@@ -5,6 +5,23 @@ from sml.bible.query import Bible
 from sml.encoder.formatter import format_sml_block
 
 
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "do", "does", "did", "have", "has", "had", "can", "could", "will",
+    "would", "shall", "should", "may", "might", "must",
+    "what", "which", "who", "whom", "where", "when", "why", "how",
+    "you", "your", "i", "me", "my", "we", "our", "he", "she", "it",
+    "they", "them", "their", "this", "that", "these", "those",
+    "not", "no", "nor", "and", "or", "but", "if", "then", "so",
+    "of", "in", "on", "at", "to", "for", "with", "by", "from",
+    "up", "about", "into", "through", "during", "before", "after",
+    "above", "below", "between", "out", "off", "over", "under",
+    "again", "further", "too", "very", "just", "also", "now",
+    "there", "here", "all", "each", "every", "both", "few", "more",
+    "most", "other", "some", "such", "only", "own", "same",
+})
+
+
 class SMLEncoder:
     """Encodes natural language text into SML blocks using spaCy and the Bible."""
 
@@ -39,6 +56,10 @@ class SMLEncoder:
 
         Returns the concept dict or None if not found.
         """
+        # Skip stop words — they resolve to noise concepts in large Bibles
+        if token_text.lower() in _STOP_WORDS:
+            return None
+
         # Try exact match first
         concept = self.bible.lookup_concept(token_text.lower())
         if concept:
@@ -251,19 +272,30 @@ class SMLEncoder:
                 if not modifiers:
                     modifiers = self._get_bible_modifiers(concept, text)
                 eda = self._concept_to_eda(concept, modifiers)
-            else:
-                eda = self._make_unknown_eda(head_text)
+                idx = len(entities)
+                entities.append(eda)
+                entity_concepts.append(concept)
+                entity_index[chunk.root.i] = idx
+            # Skip unknown entities from noun chunks — they add noise
 
-            idx = len(entities)
-            entities.append(eda)
-            entity_concepts.append(concept)  # None if unknown
-            entity_index[chunk.root.i] = idx
+            # Phase 1a: Also extract compound nouns within the chunk
+            # e.g., "a dog bark" has root "bark" and compound "dog"
+            for token in chunk:
+                if token.dep_ == "compound" and token.i not in entity_index:
+                    comp_concept = self._resolve_concept(token.lemma_.lower(), text)
+                    if comp_concept:
+                        comp_mods = self._get_bible_modifiers(comp_concept, text)
+                        comp_eda = self._concept_to_eda(comp_concept, comp_mods)
+                        comp_idx = len(entities)
+                        entities.append(comp_eda)
+                        entity_concepts.append(comp_concept)
+                        entity_index[token.i] = comp_idx
 
         # Phase 1b: Resolve verbs/actions as entities
         for token in doc:
             if token.pos_ == "VERB" and token.i not in entity_index:
                 concept = self._resolve_concept(token.lemma_.lower(), text)
-                if concept and concept["domain"] == 3:  # action domain only
+                if concept:
                     eda = self._concept_to_eda(concept, confidence=0.85)
                     idx = len(entities)
                     entities.append(eda)
@@ -336,7 +368,7 @@ class SMLEncoder:
             if (ra[1], ra[2]) not in existing_pairs:
                 relations.append(ra)
 
-        # If no entities found, try individual nouns
+        # If no entities found, try individual nouns (known only)
         if not entities:
             for token in doc:
                 if token.pos_ in ("NOUN", "PROPN"):
@@ -344,10 +376,7 @@ class SMLEncoder:
                     if concept:
                         eda = self._concept_to_eda(concept)
                         entity_concepts.append(concept)
-                    else:
-                        eda = self._make_unknown_eda(token.lemma_.lower())
-                        entity_concepts.append(None)
-                    entities.append(eda)
+                        entities.append(eda)
 
             # Re-run Bible relation discovery for fallback entities
             if len(entities) > 1:

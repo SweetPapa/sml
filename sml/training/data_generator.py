@@ -793,7 +793,9 @@ def generate_training_data(
     encoder = SMLEncoder(bible_path, spacy_model=spacy_model)
     sml_blocks = []
     unknown_budget = max(1, int(num_examples * 0.05))  # ~5% unknowns allowed
+    thin_budget = max(5, int(num_examples * 0.20))     # ~20% thin allowed
     unknown_count = 0
+    thin_count = 0
     skipped = 0
 
     for idx, prompt in enumerate(tqdm(prompts, desc="Encoding")):
@@ -802,9 +804,9 @@ def generate_training_data(
 
         if quality == 'rich':
             sml_blocks.append((idx, prompt, sml_block))
-        elif quality == 'thin':
-            # Thin but has known entities — still usable (modifier-only queries)
+        elif quality == 'thin' and thin_count < thin_budget:
             sml_blocks.append((idx, prompt, sml_block))
+            thin_count += 1
         elif quality == 'unknown' and unknown_count < unknown_budget:
             # Intentional unknown — teaches graceful fallback
             sml_blocks.append((idx, prompt, sml_block))
@@ -814,7 +816,8 @@ def generate_training_data(
 
     encoder.close()
     print(f"Encoded {len(sml_blocks)} prompts "
-          f"({skipped} skipped, {unknown_count} intentional unknowns)")
+          f"({skipped} skipped, {thin_count} thin, "
+          f"{unknown_count} intentional unknowns)")
 
     # Phase 2: Parallel Groq generation
     print(f"\nPhase 2: Generating responses via Groq ({len(sml_blocks)} requests, "
