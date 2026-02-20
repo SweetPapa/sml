@@ -1,7 +1,15 @@
+import os
 from pathlib import Path
 
-# --- Path constants ---
+# Load .env file from project root if it exists
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+try:
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
+# --- Path constants ---
 DATA_DIR = PROJECT_ROOT / "data"
 BIBLE_DB_PATH = DATA_DIR / "sml_bible.db"
 TRAINING_DATA_PATH = DATA_DIR / "training_data.jsonl"
@@ -107,7 +115,7 @@ DEFAULT_TRAINING_ARGS = {
 
 # --- Groq config ---
 GROQ_CONFIG = {
-    "model": "llama-3.3-70b-versatile",
+    "model": os.environ.get("GROQ_MODEL", "meta-llama/llama-4-maverick-17b-128e-instruct"),
     "max_tokens": 4096,
     "temperature": 0.7,
 }

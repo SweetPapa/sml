@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.egg-info/
+data/*.db
+data/*.jsonl
+data/*.csv.gz
+data/model_output/
+.venv/
