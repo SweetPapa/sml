@@ -28,7 +28,16 @@ def main():
                         help="Maximum sequence length")
     parser.add_argument("--merge", action="store_true",
                         help="Merge LoRA weights and save full model after training")
+    parser.add_argument("--mode", choices=["test", "full"], default=None,
+                        help="Preset: 'test' (1 epoch, batch=2) or 'full' (5 epochs)")
     args = parser.parse_args()
+
+    # Override training params based on mode preset
+    if args.mode == "test":
+        args.epochs = 1
+        args.batch_size = 2
+    elif args.mode == "full":
+        args.epochs = 5
 
     # Check data exists
     if not Path(args.data).exists():

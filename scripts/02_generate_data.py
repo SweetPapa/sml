@@ -36,7 +36,17 @@ def main():
         "--coverage-only", action="store_true",
         help="Only compute encoder coverage stats (no Groq API calls)"
     )
+    parser.add_argument(
+        "--mode", choices=["test", "full"], default=None,
+        help="Preset: 'test' (50 examples) or 'full' (15000 examples)"
+    )
     args = parser.parse_args()
+
+    # Override num_examples based on mode preset
+    if args.mode == "test":
+        args.num_examples = 50
+    elif args.mode == "full":
+        args.num_examples = 15000
 
     # Check Bible exists
     if not Path(args.bible).exists():
@@ -77,12 +87,16 @@ def main():
         print("Error: Groq API key required. Set GROQ_API_KEY env var or use --groq-api-key")
         sys.exit(1)
 
+    from sml.config import GROQ_PARALLEL
+
     print("=" * 60)
-    print("SML Training Data Generation")
+    print("SML Training Data Generation (Parallel)")
     print("=" * 60)
     print(f"Bible: {args.bible}")
     print(f"Output: {args.output}")
     print(f"Examples: {args.num_examples}")
+    print(f"Concurrency: {GROQ_PARALLEL['max_concurrent']} workers, "
+          f"{GROQ_PARALLEL['rpm_target']} RPM target")
     print()
 
     from sml.training.data_generator import generate_training_data

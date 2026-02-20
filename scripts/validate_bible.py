@@ -11,34 +11,126 @@ from sml.config import BIBLE_DB_PATH
 
 # Curated ground truth: concept -> expected HasProperty targets
 GROUND_TRUTH = {
-    "sun": ["yellow", "hot"],
+    "sun": ["yellow", "hot", "bright"],
     "sky": ["blue"],
-    "grass": ["green"],
-    "fire": ["red", "hot"],
-    "snow": ["white", "cold"],
-    "ice": ["cold"],
-    "ocean": ["blue"],
-    "night": ["dark"],
-    "tree": ["green"],
-    "elephant": ["big", "heavy"],
-    "mouse": ["small"],
-    "apple": ["red"],
-    "water": ["cold"],
-    "milk": ["white"],
-    "dog": ["brown", "fast"],
-    "cat": ["small"],
-    "penguin": ["black", "white"],
+    "grass": ["green", "soft"],
+    "fire": ["red", "hot", "bright", "dangerous"],
+    "snow": ["white", "cold", "soft"],
+    "ice": ["cold", "hard"],
+    "ocean": ["blue", "deep", "salty", "big"],
+    "night": ["dark", "quiet"],
+    "tree": ["green", "big", "tall"],
+    "elephant": ["big", "heavy", "slow"],
+    "mouse": ["small", "light", "quiet", "fast"],
+    "apple": ["red", "sweet", "round"],
+    "water": ["cold", "clear"],
+    "milk": ["white", "healthy"],
+    "dog": ["brown", "fast", "friendly", "loyal"],
+    "cat": ["small", "independent", "quick"],
+    "penguin": ["black", "white", "cute"],
+    "snake": ["long"],
+    "bird": ["light"],
+    "bread": ["soft"],
+    "ball": ["round"],
+    "book": ["useful"],
+    "park": ["green"],
 }
 
 # Curated capability ground truth: concept -> expected CapableOf targets
 CAPABILITY_TRUTH = {
-    "dog": ["bark", "run", "swim"],
-    "bird": ["fly"],
-    "fish": ["swim"],
-    "penguin": ["swim", "walk"],
-    "snake": ["swim"],
-    "elephant": ["walk"],
+    "dog": ["bark", "run", "swim", "chase", "hear", "eat", "wag"],
+    "cat": ["purr", "run", "climb", "meow", "chase", "walk", "eat"],
+    "bird": ["fly", "sing", "build", "walk"],
+    "fish": ["swim", "eat"],
+    "penguin": ["swim", "walk", "eat"],
+    "snake": ["swim", "eat"],
+    "elephant": ["walk", "swim", "eat", "drink"],
+    "mouse": ["run", "climb", "eat", "swim"],
+    "person": ["read", "run", "walk", "eat", "drink", "cook"],
+    "child": ["play", "learn", "read"],
 }
+
+# Taxonomy ground truth: concept -> expected IsA targets
+TAXONOMY_TRUTH = {
+    "dog": ["animal", "mammal", "pet"],
+    "cat": ["animal", "mammal", "pet"],
+    "bird": ["animal"],
+    "fish": ["animal"],
+    "penguin": ["bird", "animal"],
+    "snake": ["reptile", "animal"],
+    "elephant": ["mammal", "animal"],
+    "mouse": ["mammal", "animal"],
+    "sun": ["star"],
+    "apple": ["fruit"],
+    "grass": ["plant"],
+    "tree": ["plant"],
+}
+
+# Body part ground truth: concept -> expected HasA targets
+BODY_PART_TRUTH = {
+    "dog": ["leg", "tail", "ear", "fur"],
+    "cat": ["leg", "tail", "fur"],
+    "bird": ["wing", "leg"],
+    "fish": ["scale"],
+    "penguin": ["wing"],
+    "snake": ["scale"],
+    "elephant": ["leg", "trunk", "ear"],
+    "mouse": ["tail"],
+    "tree": ["leaf"],
+}
+
+# Antonym ground truth: concept -> expected Antonym targets
+ANTONYM_TRUTH = {
+    "hot": ["cold"],
+    "cold": ["hot"],
+    "big": ["small"],
+    "small": ["big"],
+    "fast": ["slow"],
+    "slow": ["fast"],
+    "dark": ["bright"],
+    "bright": ["dark"],
+    "old": ["young"],
+    "heavy": ["light"],
+    "light": ["heavy"],
+    "soft": ["hard"],
+    "hard": ["soft"],
+    "quiet": ["loud"],
+    "loud": ["quiet"],
+}
+
+
+def _validate_relation_type(bible, truth_dict, relation_type_id, relation_name):
+    """Validate a set of ground truth entries for a given relation type."""
+    results = []
+    for concept_text, expected_targets in truth_dict.items():
+        concept = bible.lookup_concept(concept_text)
+        if concept is None:
+            results.append({
+                "concept": concept_text,
+                "type": relation_name,
+                "status": "MISSING_CONCEPT",
+                "expected": expected_targets,
+                "found": [],
+                "missing": expected_targets,
+            })
+            continue
+
+        rels = bible.get_outgoing_relations(concept["id"])
+        type_rels = [r for r in rels if r["relation_type_id"] == relation_type_id]
+        found_targets = [r["target_text"] for r in type_rels]
+
+        missing = [t for t in expected_targets if t not in found_targets]
+        status = "PASS" if not missing else "MISSING"
+
+        results.append({
+            "concept": concept_text,
+            "type": relation_name,
+            "status": status,
+            "expected": expected_targets,
+            "found": found_targets,
+            "missing": missing,
+        })
+    return results
 
 
 def validate_bible(bible_path: str, verbose: bool = False) -> dict:
@@ -51,70 +143,20 @@ def validate_bible(bible_path: str, verbose: bool = False) -> dict:
     bible = Bible(bible_path)
     results = []
 
-    # Validate HasProperty relations
-    for concept_text, expected_props in GROUND_TRUTH.items():
-        concept = bible.lookup_concept(concept_text)
-        if concept is None:
-            results.append({
-                "concept": concept_text,
-                "type": "HasProperty",
-                "status": "MISSING_CONCEPT",
-                "expected": expected_props,
-                "found": [],
-            })
-            continue
+    # Validate HasProperty relations (type_id=4)
+    results.extend(_validate_relation_type(bible, GROUND_TRUTH, 4, "HasProperty"))
 
-        # Get all outgoing HasProperty relations (type_id=4)
-        rels = bible.get_outgoing_relations(concept["id"])
-        has_prop_rels = [r for r in rels if r["relation_type_id"] == 4]
-        found_props = [r["target_text"] for r in has_prop_rels]
+    # Validate CapableOf relations (type_id=5)
+    results.extend(_validate_relation_type(bible, CAPABILITY_TRUTH, 5, "CapableOf"))
 
-        missing = [p for p in expected_props if p not in found_props]
-        if missing:
-            status = "MISSING"
-        else:
-            status = "PASS"
+    # Validate IsA relations (type_id=1)
+    results.extend(_validate_relation_type(bible, TAXONOMY_TRUTH, 1, "IsA"))
 
-        results.append({
-            "concept": concept_text,
-            "type": "HasProperty",
-            "status": status,
-            "expected": expected_props,
-            "found": found_props,
-            "missing": missing if missing else [],
-        })
+    # Validate HasA relations (type_id=3)
+    results.extend(_validate_relation_type(bible, BODY_PART_TRUTH, 3, "HasA"))
 
-    # Validate CapableOf relations
-    for concept_text, expected_caps in CAPABILITY_TRUTH.items():
-        concept = bible.lookup_concept(concept_text)
-        if concept is None:
-            results.append({
-                "concept": concept_text,
-                "type": "CapableOf",
-                "status": "MISSING_CONCEPT",
-                "expected": expected_caps,
-                "found": [],
-            })
-            continue
-
-        rels = bible.get_outgoing_relations(concept["id"])
-        cap_rels = [r for r in rels if r["relation_type_id"] == 5]
-        found_caps = [r["target_text"] for r in cap_rels]
-
-        missing = [c for c in expected_caps if c not in found_caps]
-        if missing:
-            status = "MISSING"
-        else:
-            status = "PASS"
-
-        results.append({
-            "concept": concept_text,
-            "type": "CapableOf",
-            "status": status,
-            "expected": expected_caps,
-            "found": found_caps,
-            "missing": missing if missing else [],
-        })
+    # Validate Antonym relations (type_id=22)
+    results.extend(_validate_relation_type(bible, ANTONYM_TRUTH, 22, "Antonym"))
 
     bible.close()
 

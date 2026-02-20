@@ -120,6 +120,15 @@ GROQ_CONFIG = {
     "temperature": 0.7,
 }
 
+# --- Groq parallelization config (loaded from .env with Developer tier defaults) ---
+GROQ_PARALLEL = {
+    "max_concurrent": int(os.environ.get("GROQ_MAX_CONCURRENT", "15")),
+    "rpm_target": int(os.environ.get("GROQ_RPM_TARGET", "100")),
+    "tpm_budget": int(os.environ.get("GROQ_TPM_BUDGET", "80000")),
+    "max_retries": int(os.environ.get("GROQ_MAX_RETRIES", "5")),
+    "initial_backoff_s": 1.0,
+}
+
 # --- System prompt ---
 SML_SYSTEM_PROMPT = (
     "You are an AI assistant that uses Semantic Markup Language (SML) to ground "

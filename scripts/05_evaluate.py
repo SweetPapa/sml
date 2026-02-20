@@ -357,6 +357,10 @@ def main():
         "--output-dir", type=str, default=str(DATA_DIR / "eval_results"),
         help="Directory for JSON output"
     )
+    parser.add_argument(
+        "--quick", action="store_true",
+        help="Quick eval: 2 tests per category (10 total) instead of full 50"
+    )
     args = parser.parse_args()
 
     # Check paths
@@ -384,6 +388,8 @@ def main():
     ]
 
     for cat_key, cat_label, tests in categories:
+        if args.quick:
+            tests = tests[:2]
         print("=" * 70)
         print(f"  {cat_label} ({len(tests)} tests)")
         print("=" * 70)

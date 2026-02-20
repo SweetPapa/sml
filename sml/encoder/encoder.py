@@ -141,6 +141,24 @@ class SMLEncoder:
         elif any(w in text_lower for w in ("heavy", "light", "weight")):
             priority_domain = 4
             priority_category = 7  # weight category
+        elif any(w in text_lower for w in ("soft", "hard", "texture")):
+            priority_domain = 4
+            priority_category = 8  # texture category
+        elif any(w in text_lower for w in ("sweet", "salty", "taste")):
+            priority_domain = 4
+            priority_category = 9  # taste category
+        elif any(w in text_lower for w in ("round", "long", "shape")):
+            priority_domain = 4
+            priority_category = 10  # shape category
+        elif any(w in text_lower for w in ("quiet", "loud", "sound", "noise")):
+            priority_domain = 4
+            priority_category = 11  # sound category
+        elif any(w in text_lower for w in ("clear", "transparent")):
+            priority_domain = 4
+            priority_category = 12  # clarity category
+        elif any(w in text_lower for w in ("friendly", "loyal", "independent", "cute")):
+            priority_domain = 4
+            priority_category = 13  # personality category
 
         # Look up full concept info for each target
         modifiers = []
@@ -161,6 +179,32 @@ class SMLEncoder:
         # Return prioritized first, then others, up to max_modifiers
         modifiers = (prioritized + others)[:max_modifiers]
         return modifiers
+
+    def _find_bible_relations(self, entity_concepts: list) -> list:
+        """Query Bible for relations between all pairs of resolved entities."""
+        relations = []
+        seen = set()
+        for i, ci in enumerate(entity_concepts):
+            if ci is None:
+                continue
+            outgoing = self.bible.get_outgoing_relations(ci["id"])
+            # Keep best relation per target
+            target_map = {}
+            for rel in outgoing:
+                tid = rel["target_id"]
+                if tid not in target_map or rel["weight"] > target_map[tid]["weight"]:
+                    target_map[tid] = rel
+            for j, cj in enumerate(entity_concepts):
+                if i == j or cj is None or (i, j) in seen:
+                    continue
+                if cj["id"] in target_map:
+                    rel = target_map[cj["id"]]
+                    seen.add((i, j))
+                    relations.append([
+                        rel["relation_type_id"], i, j,
+                        round(rel["weight"], 2), 0, 0
+                    ])
+        return relations
 
     def _find_relation_type(self, dep_label: str) -> Optional[int]:
         """Map spaCy dependency label to SML relation type ID."""
@@ -184,9 +228,10 @@ class SMLEncoder:
         Returns the formatted <sml>...</sml> block string.
         """
         doc = self.nlp(text)
-        entities = []       # List of EDA arrays
-        relations = []      # List of RA arrays
-        entity_index = {}   # token index -> entity list index
+        entities = []           # List of EDA arrays
+        entity_concepts = []    # Parallel list: Bible concept dict or None per entity
+        relations = []          # List of RA arrays
+        entity_index = {}       # token index -> entity list index
 
         # Phase 1: Extract entities from noun chunks
         for chunk in doc.noun_chunks:
@@ -211,7 +256,19 @@ class SMLEncoder:
 
             idx = len(entities)
             entities.append(eda)
+            entity_concepts.append(concept)  # None if unknown
             entity_index[chunk.root.i] = idx
+
+        # Phase 1b: Resolve verbs/actions as entities
+        for token in doc:
+            if token.pos_ == "VERB" and token.i not in entity_index:
+                concept = self._resolve_concept(token.lemma_.lower(), text)
+                if concept and concept["domain"] == 3:  # action domain only
+                    eda = self._concept_to_eda(concept, confidence=0.85)
+                    idx = len(entities)
+                    entities.append(eda)
+                    entity_concepts.append(concept)
+                    entity_index[token.i] = idx
 
         # Phase 2: Extract relations from dependency tree
         for token in doc:
@@ -272,6 +329,13 @@ class SMLEncoder:
                     ra = [rel_type, subj_idx, obj_idx, 0.85, temporal, 0]
                     relations.append(ra)
 
+        # Phase 3: Bible relation enrichment
+        bible_rels = self._find_bible_relations(entity_concepts)
+        existing_pairs = {(r[1], r[2]) for r in relations}
+        for ra in bible_rels:
+            if (ra[1], ra[2]) not in existing_pairs:
+                relations.append(ra)
+
         # If no entities found, try individual nouns
         if not entities:
             for token in doc:
@@ -279,9 +343,17 @@ class SMLEncoder:
                     concept = self._resolve_concept(token.lemma_.lower(), text)
                     if concept:
                         eda = self._concept_to_eda(concept)
+                        entity_concepts.append(concept)
                     else:
                         eda = self._make_unknown_eda(token.lemma_.lower())
+                        entity_concepts.append(None)
                     entities.append(eda)
+
+            # Re-run Bible relation discovery for fallback entities
+            if len(entities) > 1:
+                bible_rels = self._find_bible_relations(entity_concepts)
+                for ra in bible_rels:
+                    relations.append(ra)
 
         # If still nothing, create an unknown block
         if not entities:

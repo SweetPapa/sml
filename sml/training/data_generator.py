@@ -1,15 +1,21 @@
 """Training data generator — inverted pipeline using SML Encoder + Groq."""
+import asyncio
 import json
+import logging
+import random
 import time
 from pathlib import Path
 from typing import Optional
 
 from sml.config import (
     GROQ_CONFIG,
+    GROQ_PARALLEL,
     SML_SYSTEM_PROMPT,
     TEACHER_PROMPT_TEMPLATE,
     TRAINING_DATA_PATH,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # Micro-PoC prompt set — 300+ hand-crafted prompts for expanded Bible concepts
@@ -382,7 +388,7 @@ MICRO_PROMPTS = [
 
 def compute_coverage(
     bible_path: str,
-    prompts: list[str] | None = None,
+    prompts: Optional[list[str]] = None,
     spacy_model: str = "en_core_web_sm",
 ) -> dict:
     """Compute encoder coverage over a set of prompts.
@@ -457,6 +463,274 @@ def compute_coverage(
     return stats
 
 
+GROQ_SYSTEM_MSG = (
+    "You are a neurosymbolic reasoning assistant. You will be given a user question "
+    "and a Semantic Markup Language (SML) context block that contains grounded facts.\n\n"
+    "You must respond in EXACTLY this format:\n\n"
+    "<thinking>\n"
+    "SML entities identified: [list the entities from the SML block with their anchor tokens]\n"
+    "SML relations: [list the relations and what they mean]\n"
+    "Reasoning: [explain your reasoning, explicitly referencing the SML data]\n"
+    "</thinking>\n"
+    "<response>\n"
+    "[Your answer to the user's question, grounded in the SML facts]\n"
+    "</response>\n\n"
+    "CRITICAL RULES:\n"
+    "- Your response MUST be grounded in the SML context provided\n"
+    "- You MUST reference specific SML anchor tokens (e.g., dog_1001, yellow_3004) in your thinking\n"
+    "- If the SML says something that contradicts common knowledge, FOLLOW THE SML\n"
+    "- The <thinking> block must be at least 2-3 sentences\n"
+    "- Never skip the <thinking> block\n"
+    "- If a relation uses NOT_ prefix (e.g., NOT_CapableOf), it means the entity CANNOT do that action"
+)
+
+
+def _classify_sml_quality(sml_block: str) -> str:
+    """Classify SML block quality.
+
+    Returns:
+      'rich'    — has known entities AND relations (ideal)
+      'thin'    — has known entities but NO relations (usable but weak)
+      'unknown' — all entities are unknown_* tokens (fallback example)
+    """
+    lines = sml_block.strip().split('\n')
+    has_relation = any(l.strip().startswith('R(') for l in lines)
+    has_known = any('E(' in l and 'unknown_' not in l for l in lines)
+
+    if has_known and has_relation:
+        return 'rich'
+    elif has_known:
+        return 'thin'
+    else:
+        return 'unknown'
+
+
+def _prepare_prompts(
+    prompts: Optional[list[str]], num_examples: int,
+) -> list[str]:
+    """Cycle/trim prompt list to match num_examples."""
+    if prompts is None:
+        prompts = MICRO_PROMPTS
+    if len(prompts) < num_examples:
+        full = []
+        while len(full) < num_examples:
+            full.extend(prompts)
+        return full[:num_examples]
+    return prompts[:num_examples]
+
+
+# ── Parallel generation ───────────────────────────────────────────────────────
+
+class _RateLimiter:
+    """Adaptive rate limiter that reads Groq response headers."""
+
+    def __init__(self, max_concurrent: int, rpm_target: int, tpm_budget: int):
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.max_concurrent = max_concurrent
+        self.rpm_target = rpm_target
+        self.tpm_budget = tpm_budget
+        self.min_delay = 60.0 / rpm_target  # seconds between requests
+        self._last_request_time = 0.0
+        self._lock = asyncio.Lock()
+        # Adaptive state from headers
+        self._remaining_tokens = tpm_budget
+        self._remaining_requests = 10000  # optimistic default
+
+    async def acquire(self):
+        """Wait for semaphore + pacing delay."""
+        await self.semaphore.acquire()
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_request_time
+            if elapsed < self.min_delay:
+                await asyncio.sleep(self.min_delay - elapsed)
+            self._last_request_time = time.monotonic()
+
+    def release(self):
+        self.semaphore.release()
+
+    def update_from_headers(self, headers: dict):
+        """Read Groq rate-limit headers and adapt."""
+        try:
+            rt = headers.get("x-ratelimit-remaining-tokens")
+            if rt is not None:
+                self._remaining_tokens = int(rt)
+            rr = headers.get("x-ratelimit-remaining-requests")
+            if rr is not None:
+                self._remaining_requests = int(rr)
+        except (ValueError, TypeError):
+            pass
+
+        # Adaptive throttling
+        if self._remaining_tokens < 20000:
+            self.semaphore = asyncio.Semaphore(min(5, self.max_concurrent))
+            self.min_delay = 2.0
+            logger.warning(
+                "Tokens low (%d remaining) — reducing to 5 concurrent, 2s delay",
+                self._remaining_tokens,
+            )
+        elif self._remaining_tokens < 50000:
+            self.semaphore = asyncio.Semaphore(min(10, self.max_concurrent))
+            self.min_delay = 1.0
+        else:
+            self.min_delay = 60.0 / self.rpm_target
+
+        if self._remaining_requests < 100:
+            logger.warning(
+                "RPD low (%d remaining) — consider pausing and resuming tomorrow",
+                self._remaining_requests,
+            )
+
+
+async def _call_groq_with_retry(
+    client,
+    messages: list[dict],
+    rate_limiter: _RateLimiter,
+    max_retries: int,
+    initial_backoff: float,
+) -> Optional[str]:
+    """Call Groq API with exponential backoff + jitter on 429/503."""
+    for attempt in range(max_retries):
+        await rate_limiter.acquire()
+        try:
+            completion = client.chat.completions.create(
+                model=GROQ_CONFIG["model"],
+                messages=messages,
+                max_tokens=GROQ_CONFIG["max_tokens"],
+                temperature=GROQ_CONFIG["temperature"],
+            )
+
+            # Read rate-limit headers from the raw response if available
+            raw = getattr(completion, "_raw_response", None) or getattr(completion, "response", None)
+            if raw and hasattr(raw, "headers"):
+                rate_limiter.update_from_headers(dict(raw.headers))
+
+            content = completion.choices[0].message.content
+            return content
+
+        except Exception as e:
+            err_str = str(e)
+            status = getattr(e, "status_code", None) or getattr(e, "status", None)
+
+            if status == 429 or "429" in err_str:
+                wait = initial_backoff * (2 ** attempt) + random.uniform(0, 1)
+                logger.info("429 rate-limited, retry %d/%d in %.1fs", attempt + 1, max_retries, wait)
+                await asyncio.sleep(wait)
+            elif status == 503 or "503" in err_str:
+                wait = 5.0 + random.uniform(0, 2)
+                logger.info("503 unavailable, retry %d/%d in %.1fs", attempt + 1, max_retries, wait)
+                await asyncio.sleep(wait)
+            elif "blocked_api_access" in err_str:
+                logger.error("Spend limit hit — stopping. Check Groq billing.")
+                return None
+            else:
+                logger.error("Groq error (attempt %d): %s", attempt + 1, err_str)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(initial_backoff * (2 ** attempt))
+                else:
+                    return None
+        finally:
+            rate_limiter.release()
+
+    return None
+
+
+async def _process_one(
+    idx: int,
+    prompt: str,
+    sml_block: str,
+    client,
+    rate_limiter: _RateLimiter,
+    max_retries: int,
+    initial_backoff: float,
+) -> Optional[dict]:
+    """Process a single prompt → Groq call → training example."""
+    teacher_prompt = TEACHER_PROMPT_TEMPLATE.format(prompt=prompt, sml_block=sml_block)
+
+    messages = [
+        {"role": "system", "content": GROQ_SYSTEM_MSG},
+        {"role": "user", "content": teacher_prompt},
+    ]
+
+    content = await _call_groq_with_retry(
+        client, messages, rate_limiter, max_retries, initial_backoff,
+    )
+    if not content:
+        return None
+
+    thinking, response = _parse_teacher_response(content)
+    if not thinking or not response:
+        return None
+
+    assistant_content = (
+        f"{sml_block}\n<thinking>\n{thinking}\n</thinking>\n"
+        f"<response>\n{response}\n</response>"
+    )
+    return {
+        "idx": idx,
+        "messages": [
+            {"role": "system", "content": SML_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": assistant_content},
+        ],
+    }
+
+
+async def _generate_parallel(
+    sml_blocks: list[tuple[int, str, str]],
+    groq_api_key: str,
+    output_path: str,
+    max_concurrent: int,
+    rpm_target: int,
+    tpm_budget: int,
+    max_retries: int,
+    initial_backoff: float,
+) -> tuple[int, int]:
+    """Run all Groq calls concurrently and write results incrementally."""
+    from groq import Groq
+
+    client = Groq(api_key=groq_api_key)
+    rate_limiter = _RateLimiter(max_concurrent, rpm_target, tpm_budget)
+
+    generated = 0
+    failed = 0
+    total = len(sml_blocks)
+
+    # Open file for incremental writes
+    with open(output_path, "w") as f:
+        # Create all tasks
+        tasks = []
+        for idx, prompt, sml_block in sml_blocks:
+            task = asyncio.create_task(
+                _process_one(
+                    idx, prompt, sml_block, client,
+                    rate_limiter, max_retries, initial_backoff,
+                )
+            )
+            tasks.append(task)
+
+        # Process as they complete for incremental output
+        for coro in asyncio.as_completed(tasks):
+            result = await coro
+            if result is not None:
+                example = {"messages": result["messages"]}
+                f.write(json.dumps(example) + "\n")
+                f.flush()
+                generated += 1
+            else:
+                failed += 1
+
+            done = generated + failed
+            if done % 50 == 0 or done == total:
+                print(
+                    f"  Progress: {done}/{total} "
+                    f"({generated} ok, {failed} fail, "
+                    f"tokens_remaining~{rate_limiter._remaining_tokens})"
+                )
+
+    return generated, failed
+
+
 def generate_training_data(
     bible_path: str,
     groq_api_key: str,
@@ -465,16 +739,18 @@ def generate_training_data(
     num_examples: int = 200,
     spacy_model: str = "en_core_web_sm",
 ) -> str:
-    """Generate training data using the inverted pipeline.
+    """Generate training data using the inverted pipeline with parallel Groq calls.
 
     1. Take prompts
-    2. Run each through SML Encoder -> deterministic <sml> block
-    3. Send prompt + SML block to Groq -> get <thinking> + <response>
-    4. Assemble full training tuple in ChatML format
+    2. Run each through SML Encoder → deterministic <sml> block (serial, fast)
+    3. Send prompt + SML block to Groq concurrently → get <thinking> + <response>
+    4. Assemble full training tuples in ChatML format, saved incrementally
+
+    Parallelization is controlled by GROQ_PARALLEL config (from .env):
+      GROQ_MAX_CONCURRENT (default 15), GROQ_RPM_TARGET (100), etc.
 
     Returns path to the output JSONL file.
     """
-    from groq import Groq
     from tqdm import tqdm
 
     from sml.encoder.encoder import SMLEncoder
@@ -482,101 +758,76 @@ def generate_training_data(
     output_path = output_path or str(TRAINING_DATA_PATH)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Use micro prompts or provided prompts
-    if prompts is None:
-        prompts = MICRO_PROMPTS
-
-    # Limit to num_examples (cycle prompts if needed)
-    if len(prompts) < num_examples:
-        full_prompts = []
-        while len(full_prompts) < num_examples:
-            full_prompts.extend(prompts)
-        prompts = full_prompts[:num_examples]
+    if prompts is not None:
+        # Explicit prompts provided — cycle as before
+        prompts = _prepare_prompts(prompts, num_examples)
+    elif num_examples <= len(MICRO_PROMPTS):
+        # Small run — sample from hand-crafted prompts
+        prompts = MICRO_PROMPTS[:num_examples]
     else:
-        prompts = prompts[:num_examples]
+        # Scale run — generate unique prompts from Bible
+        from sml.training.prompt_generator import PromptGenerator
 
-    # Initialize encoder and Groq client
+        gen = PromptGenerator(bible_path)
+        prompts = gen.generate(num_examples)
+        gen.close()
+        unique_count = len(set(p.lower() for p in prompts))
+        print(
+            f"Generated {len(prompts)} prompts "
+            f"({len(MICRO_PROMPTS)} hand-crafted + "
+            f"{len(prompts) - len(MICRO_PROMPTS)} templated, "
+            f"{unique_count} unique)"
+        )
+
+    max_concurrent = GROQ_PARALLEL["max_concurrent"]
+    rpm_target = GROQ_PARALLEL["rpm_target"]
+    tpm_budget = GROQ_PARALLEL["tpm_budget"]
+    max_retries = GROQ_PARALLEL["max_retries"]
+    initial_backoff = GROQ_PARALLEL["initial_backoff_s"]
+
+    print(f"Parallel config: {max_concurrent} concurrent, {rpm_target} RPM target, "
+          f"{tpm_budget} TPM budget, {max_retries} max retries")
+
+    # Phase 1: Encode all prompts (serial — fast, no API calls)
+    print("\nPhase 1: Encoding prompts into SML blocks...")
     encoder = SMLEncoder(bible_path, spacy_model=spacy_model)
-    client = Groq(api_key=groq_api_key)
+    sml_blocks = []
+    unknown_budget = max(1, int(num_examples * 0.05))  # ~5% unknowns allowed
+    unknown_count = 0
+    skipped = 0
 
-    generated = 0
-    failed = 0
+    for idx, prompt in enumerate(tqdm(prompts, desc="Encoding")):
+        sml_block = encoder.encode(prompt)
+        quality = _classify_sml_quality(sml_block)
 
-    with open(output_path, "w") as f:
-        for prompt in tqdm(prompts, desc="Generating training data"):
-            try:
-                # Step 1: Encode the prompt into SML
-                sml_block = encoder.encode(prompt)
-
-                # Step 2: Send to Groq for thinking + response
-                teacher_prompt = TEACHER_PROMPT_TEMPLATE.format(
-                    prompt=prompt, sml_block=sml_block
-                )
-
-                groq_system_msg = (
-                    "You are a neurosymbolic reasoning assistant. You will be given a user question "
-                    "and a Semantic Markup Language (SML) context block that contains grounded facts.\n\n"
-                    "You must respond in EXACTLY this format:\n\n"
-                    "<thinking>\n"
-                    "SML entities identified: [list the entities from the SML block with their anchor tokens]\n"
-                    "SML relations: [list the relations and what they mean]\n"
-                    "Reasoning: [explain your reasoning, explicitly referencing the SML data]\n"
-                    "</thinking>\n"
-                    "<response>\n"
-                    "[Your answer to the user's question, grounded in the SML facts]\n"
-                    "</response>\n\n"
-                    "CRITICAL RULES:\n"
-                    "- Your response MUST be grounded in the SML context provided\n"
-                    "- You MUST reference specific SML anchor tokens (e.g., dog_1001, yellow_3004) in your thinking\n"
-                    "- If the SML says something that contradicts common knowledge, FOLLOW THE SML\n"
-                    "- The <thinking> block must be at least 2-3 sentences\n"
-                    "- Never skip the <thinking> block\n"
-                    "- If a relation uses NOT_ prefix (e.g., NOT_CapableOf), it means the entity CANNOT do that action"
-                )
-
-                completion = client.chat.completions.create(
-                    model=GROQ_CONFIG["model"],
-                    messages=[
-                        {"role": "system", "content": groq_system_msg},
-                        {"role": "user", "content": teacher_prompt},
-                    ],
-                    max_tokens=GROQ_CONFIG["max_tokens"],
-                    temperature=GROQ_CONFIG["temperature"],
-                )
-
-                teacher_response = completion.choices[0].message.content
-                if not teacher_response:
-                    failed += 1
-                    continue
-
-                # Step 3: Ensure response has proper tags
-                thinking, response = _parse_teacher_response(teacher_response)
-                if not thinking or not response:
-                    failed += 1
-                    continue
-
-                # Step 4: Assemble training tuple in ChatML format
-                assistant_content = f"{sml_block}\n<thinking>\n{thinking}\n</thinking>\n<response>\n{response}\n</response>"
-
-                training_example = {
-                    "messages": [
-                        {"role": "system", "content": SML_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                        {"role": "assistant", "content": assistant_content},
-                    ]
-                }
-
-                f.write(json.dumps(training_example) + "\n")
-                generated += 1
-
-            except Exception as e:
-                print(f"\nError on prompt '{prompt[:50]}...': {e}")
-                failed += 1
-
-            # Rate limiting — Groq free tier is ~30 req/min
-            time.sleep(2.0)
+        if quality == 'rich':
+            sml_blocks.append((idx, prompt, sml_block))
+        elif quality == 'thin':
+            # Thin but has known entities — still usable (modifier-only queries)
+            sml_blocks.append((idx, prompt, sml_block))
+        elif quality == 'unknown' and unknown_count < unknown_budget:
+            # Intentional unknown — teaches graceful fallback
+            sml_blocks.append((idx, prompt, sml_block))
+            unknown_count += 1
+        else:
+            skipped += 1
 
     encoder.close()
+    print(f"Encoded {len(sml_blocks)} prompts "
+          f"({skipped} skipped, {unknown_count} intentional unknowns)")
+
+    # Phase 2: Parallel Groq generation
+    print(f"\nPhase 2: Generating responses via Groq ({len(sml_blocks)} requests, "
+          f"~{len(sml_blocks) * 60 // rpm_target}s estimated)...")
+
+    generated, failed = asyncio.run(
+        _generate_parallel(
+            sml_blocks, groq_api_key, output_path,
+            max_concurrent, rpm_target, tpm_budget,
+            max_retries, initial_backoff,
+        )
+    )
+
     print(f"\nGeneration complete: {generated} examples, {failed} failures")
     print(f"Output: {output_path}")
     return output_path

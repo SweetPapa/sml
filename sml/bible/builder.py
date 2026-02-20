@@ -105,6 +105,95 @@ def _get_wordnet_taxonomy(surface_text: str) -> dict:
     }
 
 
+# Curated mapping: surface_text -> property category ID
+_PROPERTY_CATEGORY_SEEDS = {
+    # 1: color
+    "red": 1, "blue": 1, "green": 1, "yellow": 1, "brown": 1,
+    "white": 1, "black": 1, "orange": 1, "purple": 1, "pink": 1,
+    "gray": 1, "grey": 1, "golden": 1, "silver": 1, "crimson": 1,
+    "scarlet": 1, "violet": 1, "maroon": 1, "turquoise": 1, "beige": 1,
+    "tan": 1, "ivory": 1, "indigo": 1, "magenta": 1, "teal": 1,
+    "colorful": 1, "colourful": 1, "multicolored": 1,
+    # 2: size
+    "big": 2, "small": 2, "tall": 2, "deep": 2, "large": 2,
+    "tiny": 2, "huge": 2, "short": 2, "narrow": 2, "wide": 2,
+    "vast": 2, "little": 2, "enormous": 2, "giant": 2, "massive": 2,
+    "miniature": 2, "petite": 2, "compact": 2, "immense": 2, "thick": 2, "thin": 2,
+    # 3: temperature
+    "hot": 3, "cold": 3, "warm": 3, "cool": 3, "freezing": 3,
+    "boiling": 3, "chilly": 3, "icy": 3, "lukewarm": 3, "tepid": 3, "scorching": 3,
+    # 4: speed
+    "fast": 4, "slow": 4, "quick": 4, "rapid": 4, "swift": 4, "speedy": 4, "sluggish": 4,
+    # 5: age
+    "old": 5, "new": 5, "young": 5, "ancient": 5, "modern": 5,
+    "fresh": 5, "elderly": 5, "youthful": 5, "aged": 5, "juvenile": 5,
+    # 6: luminosity
+    "bright": 6, "dark": 6, "dim": 6, "shiny": 6, "dull": 6,
+    "glowing": 6, "radiant": 6, "luminous": 6, "brilliant": 6, "faint": 6,
+    # 7: weight
+    "heavy": 7, "light": 7, "lightweight": 7, "weightless": 7,
+    # 8: texture
+    "soft": 8, "hard": 8, "rough": 8, "smooth": 8, "fuzzy": 8,
+    "coarse": 8, "silky": 8, "bumpy": 8, "fluffy": 8, "rigid": 8, "tender": 8, "crispy": 8,
+    # 9: taste
+    "sweet": 9, "salty": 9, "bitter": 9, "sour": 9, "spicy": 9,
+    "bland": 9, "savory": 9, "tangy": 9, "delicious": 9, "tasty": 9,
+    # 10: shape
+    "round": 10, "long": 10, "flat": 10, "curved": 10, "square": 10,
+    "circular": 10, "oval": 10, "straight": 10, "triangular": 10, "cylindrical": 10, "spherical": 10,
+    # 11: sound
+    "quiet": 11, "loud": 11, "noisy": 11, "silent": 11, "deafening": 11, "mute": 11,
+    # 12: clarity
+    "clear": 12, "transparent": 12, "opaque": 12, "murky": 12, "foggy": 12, "cloudy": 12,
+    # 13: personality/character
+    "friendly": 13, "loyal": 13, "independent": 13, "cute": 13, "brave": 13,
+    "gentle": 13, "shy": 13, "kind": 13, "mean": 13, "cruel": 13,
+    "honest": 13, "generous": 13, "stubborn": 13, "playful": 13, "aggressive": 13,
+    "calm": 13, "nervous": 13, "lazy": 13, "curious": 13, "clever": 13,
+}
+
+# Definition keyword -> category (for WordNet fallback)
+_DEFINITION_HINTS = {
+    1: ["color", "colour", "hue", "pigment", "chromatic"],
+    2: ["size", "extent", "dimension", "stature", "height"],
+    3: ["temperature", "thermal", "heat", "warmth", "cold"],
+    4: ["speed", "velocity", "pace", "motion"],
+    6: ["light", "luminous", "bright", "illuminat"],
+    7: ["weight", "mass", "heaviness"],
+    8: ["texture", "surface", "touch", "tactile"],
+    9: ["taste", "flavor", "palate"],
+    10: ["shape", "form", "geometry", "contour"],
+    11: ["sound", "noise", "auditory", "acoustic"],
+    12: ["clarity", "transparent", "visibility", "optic"],
+}
+
+
+def _classify_property_category(surface_text: str) -> int:
+    """Classify a property-domain concept into a specific category.
+
+    Returns category ID (1-13) or 0 for unclassified.
+    """
+    # Tier 1: curated seed lookup
+    cat = _PROPERTY_CATEGORY_SEEDS.get(surface_text.lower())
+    if cat is not None:
+        return cat
+
+    # Tier 2: WordNet definition heuristic
+    try:
+        from nltk.corpus import wordnet as wn
+
+        synsets = wn.synsets(surface_text.replace(" ", "_"))
+        if synsets:
+            defn = synsets[0].definition().lower()
+            for cat_id, keywords in _DEFINITION_HINTS.items():
+                if any(kw in defn for kw in keywords):
+                    return cat_id
+    except Exception:
+        pass
+
+    return 0
+
+
 def _generate_anchor_token(surface_text: str, concept_id: int) -> str:
     """Generate string-anchored token like dog_1001."""
     clean = surface_text.lower().replace(" ", "_").replace("-", "_")
@@ -220,6 +309,11 @@ def build_full_bible(
             print(f"  Processed {i}/{len(concepts)} concepts...")
 
         taxonomy = _get_wordnet_taxonomy(text)
+
+        # Reclassify property categories to match encoder scheme
+        if taxonomy["domain"] == 4:
+            taxonomy["category"] = _classify_property_category(text)
+
         anchor = _generate_anchor_token(text, info["id"])
 
         # Try to get WordNet definition
