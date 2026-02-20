@@ -102,12 +102,18 @@ def main():
         report_to="none",
     )
 
+    def formatting_func(example):
+        return tokenizer.apply_chat_template(
+            example["messages"], tokenize=False, add_generation_prompt=False
+        )
+
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
         args=training_args,
+        formatting_func=formatting_func,
         max_seq_length=args.max_seq_length,
     )
 
