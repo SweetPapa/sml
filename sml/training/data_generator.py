@@ -505,6 +505,31 @@ def _classify_sml_quality(sml_block: str) -> str:
         return 'unknown'
 
 
+_PUNT_PHRASES = (
+    "not enough information",
+    "does not contain sufficient",
+    "does not contain information",
+    "does not provide sufficient",
+    "does not provide enough",
+    "does not provide information",
+    "does not provide a direct",
+    "does not directly state",
+    "does not directly provide",
+    "not possible to determine",
+    "cannot be determined",
+    "cannot determine",
+    "doesn't directly state",
+    "no information available",
+    "insufficient information",
+)
+
+
+def _is_punt_response(response: str) -> bool:
+    """Detect teacher responses that punt due to thin SML."""
+    lower = response.lower()
+    return any(phrase in lower for phrase in _PUNT_PHRASES)
+
+
 def _prepare_prompts(
     prompts: Optional[list[str]], num_examples: int,
 ) -> list[str]:
@@ -660,6 +685,10 @@ async def _process_one(
 
     thinking, response = _parse_teacher_response(content)
     if not thinking or not response:
+        return None
+
+    # Filter out punt responses — teacher couldn't reason from thin SML
+    if _is_punt_response(response):
         return None
 
     assistant_content = (
