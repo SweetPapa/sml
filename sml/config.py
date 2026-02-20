@@ -92,9 +92,9 @@ RELATION_TYPES_INV = {v: k for k, v in RELATION_TYPES.items()}
 DEFAULT_TRAINING_ARGS = {
     "model_name": "unsloth/Qwen2.5-3B-Instruct-bnb-4bit",
     "max_seq_length": 4096,
-    "lora_r": 64,
-    "lora_alpha": 128,
-    "lora_dropout": 0.05,
+    "lora_r": 128,
+    "lora_alpha": 256,
+    "lora_dropout": 0.0,
     "target_modules": [
         "q_proj",
         "k_proj",
@@ -104,10 +104,10 @@ DEFAULT_TRAINING_ARGS = {
         "up_proj",
         "down_proj",
     ],
-    "num_train_epochs": 3,
+    "num_train_epochs": 5,
     "per_device_train_batch_size": 4,
     "gradient_accumulation_steps": 4,
-    "learning_rate": 2e-4,
+    "learning_rate": 1.5e-4,
     "lr_scheduler_type": "cosine",
     "warmup_ratio": 0.05,
     "weight_decay": 0.01,
@@ -123,16 +123,31 @@ GROQ_CONFIG = {
 # --- System prompt ---
 SML_SYSTEM_PROMPT = (
     "You are an AI assistant that uses Semantic Markup Language (SML) to ground "
-    "your reasoning. When provided with SML context, use it to inform your thinking "
-    "and ensure your response is accurate and well-grounded."
+    "your reasoning. When provided with SML context, you MUST:\n"
+    "1. First write a <thinking> block that references specific SML anchor tokens\n"
+    "2. Then write a <response> block with your answer grounded in the SML facts\n"
+    "NEVER skip the <thinking> block. Always reference SML entities by their anchor tokens."
 )
 
 # --- Teacher prompt template ---
 TEACHER_PROMPT_TEMPLATE = (
     "You are a neurosymbolic reasoner. I will give you a User Prompt and a Semantic "
-    "Fact Sheet (SML block). You must write a response that uses a <thinking> block "
-    "to reference the SML facts before answering in a <response> block. Ensure your "
-    "reasoning is grounded solely in the SML provided.\n\n"
+    "Fact Sheet (SML block). You must respond in EXACTLY this format:\n\n"
+    "<thinking>\n"
+    "SML entities identified: [list the entities from the SML block with their anchor tokens]\n"
+    "SML relations: [list the relations and what they mean]\n"
+    "Reasoning: [explain your reasoning, explicitly referencing the SML data]\n"
+    "</thinking>\n"
+    "<response>\n"
+    "[Your answer to the user's question, grounded in the SML facts]\n"
+    "</response>\n\n"
+    "CRITICAL RULES:\n"
+    "- Your response MUST be grounded in the SML context provided\n"
+    "- You MUST reference specific SML anchor tokens in your thinking\n"
+    "- If the SML says something that contradicts common knowledge, FOLLOW THE SML\n"
+    "- The <thinking> block must be at least 2-3 sentences\n"
+    "- Never skip the <thinking> block\n"
+    "- If a relation uses NOT_ prefix (e.g., NOT_CapableOf), it means the entity CANNOT do that action\n\n"
     "User Prompt: {prompt}\n\n"
     "SML Context:\n{sml_block}\n\n"
     "Now write your <thinking> and <response> blocks:"

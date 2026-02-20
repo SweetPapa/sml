@@ -20,6 +20,10 @@ def build_micro_bible(db_path: str) -> None:
         (1002, "/c/en/cat", "cat", "cat_1002", 1, 1, 2, 1, "A small domesticated feline"),
         (1003, "/c/en/bird", "bird", "bird_1003", 1, 1, 2, 2, "A warm-blooded egg-laying vertebrate with feathers"),
         (1004, "/c/en/fish", "fish", "fish_1004", 1, 1, 2, 4, "A limbless cold-blooded aquatic vertebrate"),
+        (1005, "/c/en/penguin", "penguin", "penguin_1005", 1, 1, 2, 3, "A flightless seabird of the southern hemisphere"),
+        (1006, "/c/en/snake", "snake", "snake_1006", 1, 1, 2, 3, "A long limbless reptile"),
+        (1007, "/c/en/elephant", "elephant", "elephant_1007", 1, 1, 2, 3, "A very large herbivorous mammal with a trunk"),
+        (1008, "/c/en/mouse", "mouse", "mouse_1008", 1, 1, 2, 3, "A small rodent with a pointed snout"),
 
         # Objects (domain=1, category=2 object)
         (2001, "/c/en/ball", "ball", "ball_2001", 1, 2, 0, 0, "A solid or hollow spherical object"),
@@ -51,6 +55,7 @@ def build_micro_bible(db_path: str) -> None:
         (4001, "/c/en/park", "park", "park_4001", 1, 4, 0, 0, "A public area of land for recreation"),
         (4002, "/c/en/kitchen", "kitchen", "kitchen_4002", 1, 4, 0, 0, "A room where food is prepared"),
         (4003, "/c/en/school", "school", "school_4003", 1, 4, 0, 0, "An institution for educating children"),
+        (4004, "/c/en/ocean", "ocean", "ocean_4004", 1, 4, 0, 0, "A vast body of salt water"),
 
         # Actions/Verbs (domain=3 action, category=0)
         (5001, "/c/en/sit", "sit", "sit_5001", 3, 0, 0, 0, "To be in a position with weight on buttocks"),
@@ -62,6 +67,9 @@ def build_micro_bible(db_path: str) -> None:
         (5007, "/c/en/purr", "purr", "purr_5007", 3, 0, 0, 0, "To make a low continuous vibrating sound"),
         (5008, "/c/en/sleep", "sleep", "sleep_5008", 3, 0, 0, 0, "A state of rest with reduced consciousness"),
         (5009, "/c/en/play", "play", "play_5009", 3, 0, 0, 0, "To engage in activity for enjoyment"),
+        (5010, "/c/en/walk", "walk", "walk_5010", 3, 0, 0, 0, "To move at a regular pace by lifting each foot in turn"),
+        (5011, "/c/en/hear", "hear", "hear_5011", 3, 0, 0, 0, "To perceive sound with the ears"),
+        (5012, "/c/en/climb", "climb", "climb_5012", 3, 0, 0, 0, "To go or come up a slope or incline"),
 
         # Properties - temperature (domain=4, category=3)
         (3201, "/c/en/hot", "hot", "hot_3201", 4, 3, 0, 0, "Having a high temperature"),
@@ -75,19 +83,38 @@ def build_micro_bible(db_path: str) -> None:
         (3205, "/c/en/old", "old", "old_3205", 4, 5, 0, 0, "Having lived for many years"),
         (3206, "/c/en/new", "new", "new_3206", 4, 5, 0, 0, "Recently made or discovered"),
 
-        # Food (domain=1, category=3 substance)
+        # Properties - luminosity (domain=4, category=6)
+        (3301, "/c/en/bright", "bright", "bright_3301", 4, 6, 0, 0, "Giving out or reflecting much light"),
+        (3302, "/c/en/dark", "dark", "dark_3302", 4, 6, 0, 0, "With little or no light"),
+
+        # Properties - weight (domain=4, category=7)
+        (3401, "/c/en/heavy", "heavy", "heavy_3401", 4, 7, 0, 0, "Of great weight; difficult to lift"),
+        (3402, "/c/en/light", "light", "light_3402", 4, 7, 0, 0, "Of little weight; not heavy"),
+
+        # Food / Substances (domain=1, category=3 substance)
         (6001, "/c/en/apple", "apple", "apple_6001", 1, 3, 0, 0, "A round fruit with red or green skin"),
         (6002, "/c/en/bread", "bread", "bread_6002", 1, 3, 0, 0, "Food made from flour, water, and yeast"),
         (6003, "/c/en/water", "water", "water_6003", 1, 3, 0, 0, "A transparent liquid essential for life"),
         (6004, "/c/en/milk", "milk", "milk_6004", 1, 3, 0, 0, "White liquid produced by mammals"),
+        (6005, "/c/en/ice", "ice", "ice_6005", 1, 3, 0, 0, "Frozen water; a solid form of water"),
 
         # Abstract (domain=2 abstract)
         (7001, "/c/en/love", "love", "love_7001", 2, 0, 0, 0, "An intense feeling of deep affection"),
         (7002, "/c/en/fear", "fear", "fear_7002", 2, 0, 0, 0, "An unpleasant emotion caused by threat"),
         (7003, "/c/en/knowledge", "knowledge", "knowledge_7003", 2, 0, 0, 0, "Facts or information acquired through experience"),
 
-        # Celestial (domain=1, category=5)
+        # Celestial / Natural (domain=1, category=5)
         (8001, "/c/en/sun", "sun", "sun_8001", 1, 5, 0, 0, "The star at the center of the solar system"),
+        (8002, "/c/en/sky", "sky", "sky_8002", 1, 5, 0, 0, "The region of the atmosphere seen from earth"),
+        (8003, "/c/en/night", "night", "night_8003", 1, 5, 0, 0, "The period of darkness between sunset and sunrise"),
+
+        # Plants / Nature (domain=1, category=1 living, subcategory=3 plant)
+        (9001, "/c/en/grass", "grass", "grass_9001", 1, 1, 3, 0, "Green vegetation covering the ground"),
+        (9002, "/c/en/tree", "tree", "tree_9002", 1, 1, 3, 0, "A tall perennial plant with a woody trunk"),
+
+        # Natural phenomena (domain=1, category=5)
+        (8004, "/c/en/fire", "fire", "fire_8004", 1, 5, 0, 0, "Combustion producing heat, light, and flame"),
+        (8005, "/c/en/snow", "snow", "snow_8005", 1, 5, 0, 0, "Frozen atmospheric water vapor falling as white flakes"),
     ]
 
     cur.executemany(
@@ -107,11 +134,20 @@ def build_micro_bible(db_path: str) -> None:
         (1001, 5005, 5, 0.70),   # dog CapableOf swim
         (1001, 5008, 5, 0.95),   # dog CapableOf sleep
         (1001, 5009, 5, 0.90),   # dog CapableOf play
+        (1001, 5010, 5, 0.95),   # dog CapableOf walk
         (1002, 5007, 5, 0.95),   # cat CapableOf purr
         (1002, 5002, 5, 0.85),   # cat CapableOf run
         (1002, 5008, 5, 0.95),   # cat CapableOf sleep
+        (1002, 5012, 5, 0.85),   # cat CapableOf climb
         (1003, 5004, 5, 0.95),   # bird CapableOf fly
         (1004, 5005, 5, 0.98),   # fish CapableOf swim
+        (1005, 5005, 5, 0.95),   # penguin CapableOf swim
+        (1005, 5010, 5, 0.90),   # penguin CapableOf walk
+        (1006, 5005, 5, 0.70),   # snake CapableOf swim
+        (1007, 5010, 5, 0.95),   # elephant CapableOf walk
+        (1007, 5005, 5, 0.60),   # elephant CapableOf swim
+        (1008, 5002, 5, 0.80),   # mouse CapableOf run
+        (1008, 5012, 5, 0.75),   # mouse CapableOf climb
 
         # IsA relations (IsA = 1)
         (1001, 1001, 1, 0.99),   # dog IsA animal (self-ref for simplicity)
@@ -124,10 +160,13 @@ def build_micro_bible(db_path: str) -> None:
         (1002, 4002, 6, 0.70),   # cat AtLocation kitchen
         (1003, 4001, 6, 0.75),   # bird AtLocation park
         (1004, 6003, 6, 0.95),   # fish AtLocation water
+        (1004, 4004, 6, 0.90),   # fish AtLocation ocean
         (1102, 4003, 6, 0.90),   # child AtLocation school
         (2005, 4003, 6, 0.85),   # book AtLocation school
         (2006, 4002, 6, 0.80),   # table AtLocation kitchen
         (2007, 4002, 6, 0.75),   # chair AtLocation kitchen
+        (1005, 4004, 6, 0.85),   # penguin AtLocation ocean
+        (1007, 4001, 6, 0.50),   # elephant AtLocation park (zoo/safari)
 
         # HasProperty relations (HasProperty = 4)
         (1001, 3005, 4, 0.70),   # dog HasProperty brown
@@ -137,7 +176,28 @@ def build_micro_bible(db_path: str) -> None:
         (6001, 3003, 4, 0.70),   # apple HasProperty green
         (8001, 3004, 4, 0.95),   # sun HasProperty yellow
         (8001, 3201, 4, 0.98),   # sun HasProperty hot
+        (8001, 3301, 4, 0.95),   # sun HasProperty bright
         (6003, 3202, 4, 0.60),   # water HasProperty cold
+        (8002, 3002, 4, 0.95),   # sky HasProperty blue
+        (9001, 3003, 4, 0.95),   # grass HasProperty green
+        (8004, 3001, 4, 0.90),   # fire HasProperty red
+        (8004, 3201, 4, 0.98),   # fire HasProperty hot
+        (8004, 3301, 4, 0.90),   # fire HasProperty bright
+        (8005, 3006, 4, 0.98),   # snow HasProperty white
+        (8005, 3202, 4, 0.95),   # snow HasProperty cold
+        (6005, 3202, 4, 0.98),   # ice HasProperty cold
+        (6005, 3006, 4, 0.80),   # ice HasProperty white
+        (8003, 3302, 4, 0.95),   # night HasProperty dark
+        (4004, 3002, 4, 0.85),   # ocean HasProperty blue
+        (9002, 3003, 4, 0.80),   # tree HasProperty green
+        (9002, 3101, 4, 0.70),   # tree HasProperty big
+        (1007, 3101, 4, 0.95),   # elephant HasProperty big
+        (1007, 3401, 4, 0.95),   # elephant HasProperty heavy
+        (1008, 3102, 4, 0.90),   # mouse HasProperty small
+        (1008, 3402, 4, 0.85),   # mouse HasProperty light
+        (1005, 3007, 4, 0.70),   # penguin HasProperty black
+        (1005, 3006, 4, 0.70),   # penguin HasProperty white
+        (6004, 3006, 4, 0.85),   # milk HasProperty white
 
         # UsedFor relations (UsedFor = 12)
         (2001, 5009, 12, 0.90),  # ball UsedFor play
@@ -148,10 +208,13 @@ def build_micro_bible(db_path: str) -> None:
 
         # MadeOf (MadeOf = 16)
         (6002, 6003, 16, 0.60),  # bread MadeOf water (partially)
+        (6005, 6003, 16, 0.95),  # ice MadeOf water
+        (8005, 6003, 16, 0.90),  # snow MadeOf water
 
         # Causes (Causes = 7)
         (7002, 5002, 7, 0.60),   # fear Causes run
-        (7001, 7001, 7, 0.50),   # placeholder
+        (8004, 7002, 7, 0.50),   # fire Causes fear
+        (8005, 3202, 7, 0.70),   # snow Causes cold
 
         # Desires (Desires = 18)
         (1001, 5009, 18, 0.85),  # dog Desires play

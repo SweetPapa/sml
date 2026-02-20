@@ -1,5 +1,7 @@
 """SML array formatter — converts arrays to compact string format."""
 
+from sml.config import RELATION_TYPES, RELATION_TYPES_INV
+
 
 def format_eda(array: list) -> str:
     """Format an Entity Descriptor Array as compact string.
@@ -13,14 +15,31 @@ def format_eda(array: list) -> str:
 
 
 def format_ra(array: list) -> str:
-    """Format a Relation Array as compact string.
+    """Format a Relation Array as compact string with string labels.
 
     Input: [rel_type, subject_ref, object_ref, weight, temporal, negation]
-    Output: R(6|0|1|0.85|2|0)
+    - rel_type can be int (looked up in RELATION_TYPES) or string
+    - negation flag: if 1/True, prepend NOT_ to the relation label
+
+    Output: R(CapableOf|0|1|0.85|2|0) or R(NOT_CapableOf|0|1|0.85|2|0)
     """
     if len(array) != 6:
         raise ValueError(f"RA must have 6 elements, got {len(array)}")
-    return f"R({array[0]}|{array[1]}|{array[2]}|{array[3]}|{array[4]}|{array[5]})"
+
+    rel_type = array[0]
+    negation = array[5]
+
+    # Resolve numeric rel_type to string label
+    if isinstance(rel_type, int):
+        label = RELATION_TYPES.get(rel_type, str(rel_type))
+    else:
+        label = str(rel_type)
+
+    # Prepend NOT_ if negation flag is set
+    if negation and str(negation) not in ("0", "0.0", "False"):
+        label = f"NOT_{label}"
+
+    return f"R({label}|{array[1]}|{array[2]}|{array[3]}|{array[4]}|0)"
 
 
 def format_sml_block(entities: list[list], relations: list[list]) -> str:
@@ -79,14 +98,33 @@ def parse_sml_block(sml_text: str) -> dict:
             inner = line[2:-1]
             parts = inner.split("|")
             parsed = []
-            for p in parts:
-                try:
-                    parsed.append(int(p))
-                except ValueError:
+            negation = 0
+            for idx, p in enumerate(parts):
+                if idx == 0:
+                    # First element is relation type — detect NOT_ prefix
+                    rel_label = p
+                    if p.startswith("NOT_"):
+                        negation = 1
+                        rel_label = p[4:]
+                    # Reverse-lookup label to ID
+                    if rel_label in RELATION_TYPES_INV:
+                        parsed.append(RELATION_TYPES_INV[rel_label])
+                    else:
+                        try:
+                            parsed.append(int(rel_label))
+                        except ValueError:
+                            parsed.append(rel_label)
+                else:
                     try:
-                        parsed.append(float(p))
+                        parsed.append(int(p))
                     except ValueError:
-                        parsed.append(p)
+                        try:
+                            parsed.append(float(p))
+                        except ValueError:
+                            parsed.append(p)
+            # Ensure negation flag is correctly set (position 5)
+            if len(parsed) == 6:
+                parsed[5] = negation
             relations.append(parsed)
 
     return {"entities": entities, "relations": relations}

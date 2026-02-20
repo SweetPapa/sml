@@ -12,59 +12,449 @@ from sml.config import (
 )
 
 
-# Micro-PoC prompt set — hand-crafted prompts for the ~50 micro concepts
+# Micro-PoC prompt set — 300+ hand-crafted prompts for expanded Bible concepts
+# Distribution: ~30% factual/science, ~25% commonsense, ~20% spatial/location,
+#               ~15% causation, ~10% properties, ~15% negation overlap
+
 MICRO_PROMPTS = [
+    # ── Factual / Science (~90 prompts) ───────────────────────────────────
     "What color is the sun?",
-    "Where do dogs like to go?",
-    "Can birds fly?",
-    "What do cats do when they are happy?",
-    "Where do fish live?",
-    "What is a chair used for?",
-    "Do dogs bark?",
-    "What color are apples?",
-    "Where do children go during the day?",
-    "Is the sun hot or cold?",
-    "What do dogs like to do?",
-    "Can fish swim?",
-    "Where might you find a table?",
-    "What is a book used for?",
-    "Are cats big or small?",
     "What color is the sky?",
-    "Do birds sit on trees?",
-    "What is bread made of?",
-    "Can dogs run fast?",
-    "Where do cats live?",
-    "What do children like to do?",
-    "Is water hot or cold?",
-    "The dog sat on the mat. Where is the dog?",
-    "What animals can swim?",
     "What color is grass?",
-    "The child is at school. What is the child doing?",
-    "What is love?",
-    "Can a person feel fear?",
-    "What animals bark?",
-    "The big brown dog ran in the park. Describe the scene.",
-    "Is a bird a type of animal?",
-    "What do you need water for?",
-    "The cat sat on the chair. Where is the cat?",
-    "What is milk?",
-    "Can a car fly?",
+    "What color is fire?",
     "What color is snow?",
-    "Do fish live in water?",
-    "What is the opposite of hot?",
-    "The red ball is in the park. What color is the ball?",
-    "Is a dog fast or slow?",
-    "Where might you find a book?",
-    "What does the sun look like?",
-    "The small black cat is sleeping. What is the cat doing?",
-    "What are houses used for?",
-    "Can cats purr?",
-    "What is knowledge?",
-    "The bird flew over the house. Can birds fly?",
-    "Is an apple a fruit?",
+    "What color are apples?",
+    "What color is the ocean?",
+    "What color is milk?",
     "What color can a dog be?",
+    "Is the sun hot or cold?",
+    "Is fire hot?",
+    "Is snow cold?",
+    "Is ice cold?",
+    "Is water hot or cold?",
+    "What is ice made of?",
+    "What is snow made of?",
+    "What is bread made of?",
+    "Is the sun bright?",
+    "Is the night dark?",
+    "Can birds fly?",
+    "Can fish swim?",
+    "Can dogs swim?",
+    "Can penguins swim?",
+    "Can elephants walk?",
+    "Can cats climb?",
+    "Can mice climb?",
+    "Can snakes swim?",
+    "Can dogs bark?",
+    "Can cats purr?",
+    "Can dogs run fast?",
+    "What does the sun look like?",
+    "Is an apple a fruit?",
+    "Is a bird a type of animal?",
+    "What color can apples be?",
+    "Is the sky blue during the day?",
+    "Does grass grow on the ground?",
+    "Is fire dangerous?",
+    "Does snow fall from the sky?",
+    "What color is a tree?",
+    "Are trees green?",
+    "Is the ocean big?",
+    "Is the ocean blue?",
+    "Are elephants heavy?",
+    "Are mice light?",
+    "Is an elephant big or small?",
+    "Is a mouse big or small?",
+    "What color is a penguin?",
+    "Do dogs have four legs?",
+    "Can a person feel fear?",
+    "What is love?",
+    "What is knowledge?",
+    "What animals can swim?",
+    "What animals bark?",
+    "What animals can fly?",
+    "Do fish live in water?",
+    "What do dogs like to do?",
+    "What do cats do when they are happy?",
+    "What is milk?",
+    "How heavy is an elephant?",
+    "How small is a mouse?",
+    "Is the night sky dark?",
+    "What does fire look like?",
+    "Is ice the same as water?",
+    "Can dogs hear well?",
+    "What color is night?",
+    "Is fire bright?",
+    "Is the sun yellow?",
+    "Is grass green?",
+    "Is the sky usually blue?",
+    "Do elephants swim?",
+    "Can mice run?",
+    "Do cats sleep a lot?",
+    "Do dogs sleep?",
+    "Can birds swim?",
+    "Are penguins birds?",
+    "Is a snake a reptile?",
+    "Do mice eat cheese?",
+    "Is snow white?",
+    "Is ice transparent?",
+    "Can elephants climb trees?",
+    "Are trees big?",
+    "Do trees have leaves?",
+    "Is the sun a star?",
+    "Is water blue?",
+    "Is fire red?",
+    "What temperature is ice?",
+    "What temperature is fire?",
+    "Is the ocean cold?",
+    "Is milk white?",
+    "Do penguins walk?",
+
+    # ── Commonsense (~75 prompts) ─────────────────────────────────────────
+    "Where do dogs like to go?",
+    "Where do cats live?",
+    "Where do fish live?",
+    "Where do children go during the day?",
+    "What do children like to do?",
+    "What is a chair used for?",
+    "What is a book used for?",
+    "What are houses used for?",
+    "What is a table used for?",
+    "What is a ball used for?",
+    "Can a car fly?",
+    "What do you need water for?",
     "What do you feel when something scary happens?",
+    "What is the opposite of hot?",
+    "What do dogs eat?",
+    "What do cats like to eat?",
+    "Where does a dog sleep?",
+    "What does a child do at school?",
+    "Why do dogs wag their tails?",
+    "Why do cats purr?",
+    "What happens when you throw a ball?",
+    "What can you do at a park?",
+    "What do you do when you are hungry?",
+    "What do you do when you are sleepy?",
+    "What can you find in a kitchen?",
+    "What is a car used for?",
+    "Why do people read books?",
+    "What is the opposite of cold?",
+    "What is the opposite of big?",
+    "What is the opposite of fast?",
+    "What is the opposite of dark?",
+    "What is the opposite of old?",
+    "Do people live in houses?",
+    "Do fish need water?",
+    "Do dogs need food?",
+    "Do birds build nests?",
+    "What do people do in the kitchen?",
+    "Where do fish swim?",
+    "Where do birds fly?",
+    "Do children play?",
+    "Do dogs play?",
+    "What does a cat do at home?",
+    "What does a dog do at the park?",
+    "What is a park for?",
+    "What is a school for?",
+    "Why do people drink water?",
+    "Can a fish live on land?",
+    "Can a bird walk?",
+    "Do penguins like cold weather?",
+    "Do elephants eat plants?",
+    "What do mice like to eat?",
+    "Where do snakes live?",
+    "Where do penguins live?",
+    "Where do elephants live?",
+    "Do dogs chase cats?",
+    "Do cats chase mice?",
+    "What happens when a dog sees a ball?",
+    "What happens when a cat sees a mouse?",
+    "Why do fish swim?",
+    "Why do birds fly?",
+    "Why do dogs bark?",
+    "What sound does a dog make?",
+    "What sound does a cat make?",
+    "Is an elephant a good pet?",
+    "Is a mouse a big animal?",
+    "What makes a dog happy?",
+    "What makes a cat happy?",
+    "Do children go to school?",
+    "Do dogs go to school?",
+    "What does a bird do in the morning?",
+    "What does a child do in the evening?",
+    "Where can you find a chair?",
+    "Where can you find a table?",
+    "What does a person do with a book?",
+
+    # ── Spatial / Location (~60 prompts) ──────────────────────────────────
+    "The dog sat on the mat. Where is the dog?",
+    "The cat sat on the chair. Where is the cat?",
+    "The child is at school. What is the child doing?",
+    "The red ball is in the park. What color is the ball?",
+    "The big brown dog ran in the park. Describe the scene.",
+    "The small black cat is sleeping. What is the cat doing?",
+    "The bird flew over the house. Can birds fly?",
+    "Where might you find a table?",
+    "Where might you find a book?",
+    "The fish is in the ocean. Where is the fish?",
+    "The elephant is walking in the park. What is it doing?",
+    "The penguin is swimming in the ocean. Describe the scene.",
+    "A child is reading a book at school. Where is the child?",
+    "The dog is sleeping in the house. Where is the dog?",
+    "The cat is in the kitchen. Where is the cat?",
+    "The ball is under the table. Where is the ball?",
+    "The bird is in the tree. Where is the bird?",
+    "There is snow on the ground. What does the ground look like?",
+    "The sun is in the sky. Where is the sun?",
+    "The fire is in the kitchen. Where is the fire?",
+    "A mouse is in the house. Where is the mouse?",
+    "The snake is near the tree. Where is the snake?",
+    "The chair is in the kitchen. Where is the chair?",
+    "A dog and a cat are in the house. Where are the animals?",
+    "The child is playing in the park. What is the child doing?",
+    "The fish lives in a pond. Where is the fish?",
+    "The book is on the table. Where is the book?",
+    "There is ice on the lake. What is on the lake?",
+    "The elephant is near the water. What is the elephant near?",
+    "The penguin is on the ice. Where is the penguin?",
+    "A dog is running in the park. Describe the scene.",
+    "The cat is sleeping on the mat. Where is the cat?",
+    "The apple is on the table. Where is the apple?",
+    "There is bread in the kitchen. Where is the bread?",
+    "The child walked to school. Where did the child go?",
+    "The bird landed on the tree. Where is the bird?",
+    "A big elephant is near the tree. Describe the scene.",
+    "The fast dog ran past the house. What happened?",
+    "The cold water is in a glass. Describe the water.",
+    "The white snow covers the ground. What does it look like?",
+    "The green grass is in the park. What color is the grass?",
+    "The bright sun is in the sky. Describe the sun.",
+    "The dark night sky has no sun. Describe the sky.",
+    "A yellow ball is in the park. What color is the ball?",
+    "The old book is on the table. Describe the book.",
+    "The small mouse is under the chair. Where is the mouse?",
+    "The big tree is in the park. Describe the tree.",
+    "A brown dog is at the park. Describe the dog.",
+    "The hot fire is in the kitchen. What is the fire like?",
+    "The cold ice is on the table. What is on the table?",
+    "A sleeping cat is on the chair. What is the cat doing?",
+    "The fast bird flew over the park. What happened?",
+    "A child and a dog are playing at the park. Describe the scene.",
+    "The slow elephant walked through the park. What happened?",
+    "The white milk is on the table. What color is the milk?",
+    "There is a red apple and a green apple. What colors are the apples?",
+    "The fish is swimming in the blue ocean. Where is the fish?",
+    "The dog is barking at the park. What is the dog doing?",
+    "A cat is climbing a tree. What is the cat doing?",
+    "The mouse is running under the table. Where is the mouse?",
+
+    # ── Causation (~45 prompts) ───────────────────────────────────────────
+    "What causes fear?",
+    "What happens when it snows?",
+    "What does fear cause?",
+    "What happens when fire starts?",
+    "Why do people run when scared?",
+    "What causes ice to melt?",
+    "What happens when water freezes?",
+    "What does snow cause?",
+    "What happens when the sun comes out?",
+    "Why does ice feel cold?",
+    "Why is fire hot?",
+    "What causes snow to melt?",
+    "What happens when a dog sees food?",
+    "What causes a dog to bark?",
+    "What happens when a cat is scared?",
+    "What causes water to freeze?",
+    "Why do people feel cold in snow?",
+    "What causes the sky to be blue?",
+    "What happens when you pet a cat?",
+    "What makes a dog want to play?",
+    "What causes the night to be dark?",
+    "Why is snow white?",
+    "What happens when the sun goes down?",
+    "Why do children go to school?",
+    "What causes grass to be green?",
+    "What happens when a ball is thrown?",
+    "Why do fish live in water?",
+    "What causes a person to feel love?",
+    "What happens when an elephant walks?",
+    "Why do penguins swim?",
+    "What makes the ocean blue?",
+    "What happens when a snake sees a mouse?",
+    "What causes a bird to sing?",
+    "Why does the sun look yellow?",
+    "What happens when you read a book?",
+    "Why do cats climb trees?",
+    "What causes a person to feel fear?",
+    "What happens when a mouse sees a cat?",
+    "Why do dogs like parks?",
+    "What causes apples to be red?",
+    "What happens when fire meets water?",
+    "Why is the ocean salty?",
+    "What causes snow to fall?",
+    "What happens when you sit in a chair?",
+    "Why do elephants need water?",
+
+    # ── Properties / Attributes (~30 prompts) ─────────────────────────────
+    "Is an elephant big?",
+    "Is a mouse fast?",
+    "Is a dog friendly?",
+    "Is a cat independent?",
+    "Is the sun far away?",
+    "Is the ocean deep?",
+    "Is snow soft?",
+    "Is ice hard?",
+    "Is fire bright?",
+    "Is the night quiet?",
+    "Are trees tall?",
+    "Is grass soft?",
+    "Is an elephant slow?",
+    "Is a mouse quiet?",
+    "Is a bird light?",
+    "Is a fish cold?",
+    "Is a penguin cute?",
+    "Is a snake long?",
+    "Is a dog loyal?",
+    "Is a cat quick?",
+    "Is the sky big?",
+    "Is the park green?",
+    "Is milk healthy?",
+    "Is bread soft?",
+    "Is an apple sweet?",
+    "Is water clear?",
+    "Is fire red or orange?",
+    "Is the ocean calm?",
+    "Is a ball round?",
+    "Is a book useful?",
+
+    # ── Negation (~50 prompts) ────────────────────────────────────────────
+    "Can penguins fly?",
+    "Can fish walk?",
+    "Can snakes hear?",
+    "Is ice hot?",
+    "Is the night bright?",
+    "Can elephants fly?",
+    "Can mice fly?",
+    "Is snow hot?",
+    "Can fish fly?",
+    "Is the ocean hot?",
+    "Can a car swim?",
+    "Can a table walk?",
+    "Can a chair fly?",
+    "Can a book swim?",
+    "Is fire cold?",
+    "Is the sun dark?",
+    "Is grass red?",
+    "Is the sky green?",
+    "Is milk black?",
+    "Is snow black?",
+    "Can a ball bark?",
+    "Can a house run?",
+    "Can a tree fly?",
+    "Can water walk?",
+    "Is ice hot or cold?",
+    "Can fish walk on land?",
+    "Can a dog fly?",
+    "Can a cat bark?",
+    "Can a snake fly?",
+    "Can an elephant fly?",
+    "Can a mouse bark?",
+    "Is the night bright or dark?",
+    "Is fire cold or hot?",
+    "Is snow warm?",
+    "Is ice warm?",
+    "Can a penguin bark?",
+    "Can an elephant climb trees?",
+    "Can a fish run?",
+    "Can a snake walk?",
+    "Is the sun cold?",
+    "Is water hot?",
+    "Can a mouse swim?",
+    "Can bread fly?",
+    "Is grass yellow?",
+    "Is the ocean green?",
+    "Is fire white?",
+    "Can a book walk?",
+    "Can a chair swim?",
+    "Is an elephant small?",
+    "Is a mouse big?",
 ]
+
+
+def compute_coverage(
+    bible_path: str,
+    prompts: list[str] | None = None,
+    spacy_model: str = "en_core_web_sm",
+) -> dict:
+    """Compute encoder coverage over a set of prompts.
+
+    Returns stats: concepts found vs unknown, relations per block, overall coverage %.
+    """
+    from sml.encoder.encoder import SMLEncoder
+    from sml.encoder.formatter import parse_sml_block
+
+    if prompts is None:
+        prompts = MICRO_PROMPTS
+
+    encoder = SMLEncoder(bible_path, spacy_model=spacy_model)
+
+    stats = {
+        "total_prompts": len(prompts),
+        "prompts_with_entities": 0,
+        "prompts_with_relations": 0,
+        "total_entities": 0,
+        "total_relations": 0,
+        "known_concepts": 0,
+        "unknown_concepts": 0,
+        "avg_entities_per_block": 0.0,
+        "avg_relations_per_block": 0.0,
+        "coverage_pct": 0.0,
+        "empty_blocks": 0,
+        "per_prompt": [],
+    }
+
+    for prompt in prompts:
+        sml_block = encoder.encode(prompt)
+        parsed = parse_sml_block(sml_block)
+        entities = parsed["entities"]
+        relations = parsed["relations"]
+
+        num_entities = len(entities)
+        num_relations = len(relations)
+        known = sum(1 for e in entities if isinstance(e[4], str) and not e[4].startswith("unknown_"))
+        unknown = sum(1 for e in entities if isinstance(e[4], str) and e[4].startswith("unknown_"))
+
+        stats["total_entities"] += num_entities
+        stats["total_relations"] += num_relations
+        stats["known_concepts"] += known
+        stats["unknown_concepts"] += unknown
+
+        has_entity = num_entities > 0 and known > 0
+        has_relation = num_relations > 0
+
+        if has_entity:
+            stats["prompts_with_entities"] += 1
+        if has_relation:
+            stats["prompts_with_relations"] += 1
+        if not has_entity and not has_relation:
+            stats["empty_blocks"] += 1
+
+        stats["per_prompt"].append({
+            "prompt": prompt[:80],
+            "entities": num_entities,
+            "relations": num_relations,
+            "known": known,
+            "unknown": unknown,
+        })
+
+    n = stats["total_prompts"]
+    stats["avg_entities_per_block"] = round(stats["total_entities"] / max(n, 1), 2)
+    stats["avg_relations_per_block"] = round(stats["total_relations"] / max(n, 1), 2)
+    stats["coverage_pct"] = round(
+        100 * stats["prompts_with_entities"] / max(n, 1), 1
+    )
+
+    encoder.close()
+    return stats
 
 
 def generate_training_data(
@@ -123,10 +513,31 @@ def generate_training_data(
                     prompt=prompt, sml_block=sml_block
                 )
 
+                groq_system_msg = (
+                    "You are a neurosymbolic reasoning assistant. You will be given a user question "
+                    "and a Semantic Markup Language (SML) context block that contains grounded facts.\n\n"
+                    "You must respond in EXACTLY this format:\n\n"
+                    "<thinking>\n"
+                    "SML entities identified: [list the entities from the SML block with their anchor tokens]\n"
+                    "SML relations: [list the relations and what they mean]\n"
+                    "Reasoning: [explain your reasoning, explicitly referencing the SML data]\n"
+                    "</thinking>\n"
+                    "<response>\n"
+                    "[Your answer to the user's question, grounded in the SML facts]\n"
+                    "</response>\n\n"
+                    "CRITICAL RULES:\n"
+                    "- Your response MUST be grounded in the SML context provided\n"
+                    "- You MUST reference specific SML anchor tokens (e.g., dog_1001, yellow_3004) in your thinking\n"
+                    "- If the SML says something that contradicts common knowledge, FOLLOW THE SML\n"
+                    "- The <thinking> block must be at least 2-3 sentences\n"
+                    "- Never skip the <thinking> block\n"
+                    "- If a relation uses NOT_ prefix (e.g., NOT_CapableOf), it means the entity CANNOT do that action"
+                )
+
                 completion = client.chat.completions.create(
                     model=GROQ_CONFIG["model"],
                     messages=[
-                        {"role": "system", "content": "You are a neurosymbolic AI reasoning assistant. You must ground all your reasoning in the provided SML (Semantic Markup Language) context."},
+                        {"role": "system", "content": groq_system_msg},
                         {"role": "user", "content": teacher_prompt},
                     ],
                     max_tokens=GROQ_CONFIG["max_tokens"],

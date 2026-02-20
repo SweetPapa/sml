@@ -31,6 +31,7 @@ def validate_training_data(
         "valid": 0,
         "invalid": 0,
         "errors": [],
+        "warnings": [],
     }
 
     with open(data_path) as f:
@@ -48,12 +49,16 @@ def validate_training_data(
                 continue
 
             errors = _validate_example(example, bible, line_num)
-            if errors:
+            # Separate warnings from actual errors
+            actual_errors = [e for e in errors if "WARNING:" not in e]
+            example_warnings = [e for e in errors if "WARNING:" in e]
+            stats["warnings"].extend(example_warnings)
+            if actual_errors:
                 stats["invalid"] += 1
                 if strict:
-                    stats["errors"].extend(errors)
+                    stats["errors"].extend(actual_errors)
                 else:
-                    stats["errors"].append(errors[0])  # Keep first error only
+                    stats["errors"].append(actual_errors[0])
             else:
                 stats["valid"] += 1
 
@@ -64,6 +69,10 @@ def validate_training_data(
     print(f"Validation: {stats['valid']}/{stats['total']} valid ({stats['valid_pct']}%)")
     if stats["errors"]:
         print(f"First errors: {stats['errors'][:5]}")
+    if stats["warnings"]:
+        print(f"Thinking block warnings: {len(stats['warnings'])}")
+        for w in stats["warnings"][:3]:
+            print(f"  {w}")
 
     return stats
 
@@ -95,6 +104,38 @@ def _validate_example(example: dict, bible: Bible, line_num: int) -> list[str]:
         errors.append(f"Line {line_num}: Missing <thinking> block")
     if "<response>" not in content or "</response>" not in content:
         errors.append(f"Line {line_num}: Missing <response> block")
+
+    # Check thinking block quality (warnings, not errors)
+    warnings = []
+    if "<thinking>" in content and "</thinking>" in content:
+        think_start = content.index("<thinking>") + len("<thinking>")
+        think_end = content.index("</thinking>")
+        thinking_text = content[think_start:think_end].strip()
+
+        # Check minimum length (>= 20 tokens)
+        thinking_tokens = thinking_text.split()
+        if len(thinking_tokens) < 20:
+            warnings.append(
+                f"Line {line_num}: WARNING: <thinking> block too short "
+                f"({len(thinking_tokens)} tokens, need >=20)"
+            )
+
+        # Check that thinking references at least one SML anchor token
+        # Extract anchor tokens from SML block
+        if "<sml>" in content and "</sml>" in content:
+            sml_start_tmp = content.index("<sml>")
+            sml_end_tmp = content.index("</sml>") + len("</sml>")
+            sml_text_tmp = content[sml_start_tmp:sml_end_tmp]
+            # Find all anchor tokens (strings containing _ followed by digits)
+            import re as _re
+            anchors = _re.findall(r'[a-z]+_\d+', sml_text_tmp)
+            if anchors:
+                has_anchor_ref = any(a in thinking_text for a in anchors)
+                if not has_anchor_ref:
+                    warnings.append(
+                        f"Line {line_num}: WARNING: <thinking> block does not reference "
+                        f"any SML anchor tokens"
+                    )
 
     # Extract and validate SML
     sml_start = content.index("<sml>")

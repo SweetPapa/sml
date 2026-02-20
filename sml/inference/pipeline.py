@@ -66,8 +66,8 @@ class SMLPipeline:
             messages, tokenize=False, add_generation_prompt=True
         )
 
-        # Prepend SML hint in the assistant's turn
-        prompt_text += sml_block + "\n"
+        # Prepend SML block and force <thinking> start in the assistant's turn
+        prompt_text += sml_block + "\n<thinking>\n"
 
         # Step 3: Tokenize and generate
         inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.model.device)

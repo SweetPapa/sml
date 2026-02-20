@@ -99,6 +99,69 @@ class SMLEncoder:
             round(confidence, 2),
         ]
 
+    def _get_bible_modifiers(self, concept: dict, text: str, max_modifiers: int = 2) -> list[dict]:
+        """Query Bible for HasProperty relations to fill modifier slots.
+
+        Detects property-type queries (color, size, temperature, etc.) and
+        prioritizes matching property domains.
+
+        Returns list of concept dicts for modifier slots.
+        """
+        concept_id = concept["id"]
+        rels = self.bible.get_outgoing_relations(concept_id)
+
+        # Filter to HasProperty relations (type_id=4)
+        has_prop_rels = [r for r in rels if r["relation_type_id"] == 4]
+        if not has_prop_rels:
+            return []
+
+        # Sort by weight descending
+        has_prop_rels.sort(key=lambda r: r["weight"], reverse=True)
+
+        # Detect property-type query from the input text
+        text_lower = text.lower()
+        priority_domain = None
+        priority_category = None
+
+        if any(w in text_lower for w in ("color", "colour", "what color", "what colour")):
+            priority_domain = 4    # property domain
+            priority_category = 1  # color category
+        elif any(w in text_lower for w in ("how big", "how large", "how small", "size", "how tall")):
+            priority_domain = 4
+            priority_category = 2  # size category
+        elif any(w in text_lower for w in ("hot", "cold", "temperature", "warm", "cool")):
+            priority_domain = 4
+            priority_category = 3  # temperature category
+        elif any(w in text_lower for w in ("fast", "slow", "speed", "quick")):
+            priority_domain = 4
+            priority_category = 4  # speed category
+        elif any(w in text_lower for w in ("bright", "dark", "light")):
+            priority_domain = 4
+            priority_category = 6  # luminosity category
+        elif any(w in text_lower for w in ("heavy", "light", "weight")):
+            priority_domain = 4
+            priority_category = 7  # weight category
+
+        # Look up full concept info for each target
+        modifiers = []
+        prioritized = []
+        others = []
+
+        for rel in has_prop_rels:
+            target = self.bible.get_concept_by_id(rel["target_id"])
+            if not target:
+                continue
+            if (priority_domain is not None
+                    and target["domain"] == priority_domain
+                    and target["category"] == priority_category):
+                prioritized.append(target)
+            else:
+                others.append(target)
+
+        # Return prioritized first, then others, up to max_modifiers
+        modifiers = (prioritized + others)[:max_modifiers]
+        return modifiers
+
     def _find_relation_type(self, dep_label: str) -> Optional[int]:
         """Map spaCy dependency label to SML relation type ID."""
         # Map common dependency labels to ConceptNet relation types
@@ -139,6 +202,9 @@ class SMLEncoder:
                         modifiers.append(mod_concept)
 
             if concept:
+                # If no modifiers from adjectives, query Bible for properties
+                if not modifiers:
+                    modifiers = self._get_bible_modifiers(concept, text)
                 eda = self._concept_to_eda(concept, modifiers)
             else:
                 eda = self._make_unknown_eda(head_text)
