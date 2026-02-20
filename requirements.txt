@@ -1,0 +1,12 @@
+torch>=2.1.0
+transformers>=4.40.0
+datasets>=2.19.0
+peft>=0.10.0
+trl>=0.8.0
+unsloth[colab-new]>=2024.4
+spacy>=3.7.0
+sentence-transformers>=2.7.0
+groq>=0.5.0
+numpy>=1.24.0
+tqdm>=4.66.0
+jsonlines>=4.0.0
