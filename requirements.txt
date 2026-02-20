@@ -1,4 +1,6 @@
-torch>=2.1.0
+# NOTE: Install PyTorch with CUDA *before* installing this file on Windows/Linux GPU:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# On macOS (CPU/MPS only), plain `pip install torch` is fine.
 transformers>=4.40.0
 datasets>=2.19.0
 peft>=0.10.0

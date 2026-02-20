@@ -15,9 +15,16 @@ git clone <your-repo-url> sml
 cd sml
 python -m venv .venv
 .venv\Scripts\activate
+
+# Install PyTorch with CUDA support FIRST (required for RTX 4090)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+# Then install everything else
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 ```
+
+> **Why the separate torch install?** Plain `pip install torch` on Windows gets the CPU-only build. The `--index-url` flag pulls the CUDA 12.6 build, which is what the RTX 4090 needs. If you have a different CUDA version, see https://pytorch.org/get-started/locally/ for the right URL.
 
 ## Step 2: Set Environment Variables
 
@@ -25,9 +32,10 @@ python -m spacy download en_core_web_sm
 set GROQ_API_KEY=your_groq_api_key_here
 ```
 
-Or create a `.env` file (add to `.gitignore`):
-```
-GROQ_API_KEY=your_groq_api_key_here
+Or copy the example `.env` file and fill in your key:
+```bash
+copy .env.example .env
+# Then edit .env with your key
 ```
 
 ## Step 3: Build the SML Bible
@@ -129,6 +137,10 @@ If Liar tests pass ≥50%, **SML grounding is working** — the model trusts the
 ## Quick Start (Micro-PoC, ~15 minutes total)
 
 ```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+copy .env.example .env   # then edit with your Groq API key
 python scripts/01_build_bible.py --mode micro
 python scripts/02_generate_data.py --num-examples 200 --validate
 python scripts/03_train.py --epochs 3 --merge
