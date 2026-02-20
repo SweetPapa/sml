@@ -92,7 +92,7 @@ def main():
         lr_scheduler_type=DEFAULT_TRAINING_ARGS["lr_scheduler_type"],
         warmup_ratio=DEFAULT_TRAINING_ARGS["warmup_ratio"],
         weight_decay=DEFAULT_TRAINING_ARGS["weight_decay"],
-        fp16=True,
+        bf16=True,
         logging_steps=10,
         save_strategy="steps",
         save_steps=500,
