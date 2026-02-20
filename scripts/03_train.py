@@ -103,8 +103,15 @@ def main():
     )
 
     def formatting_func(examples):
+        messages = examples["messages"]
+        # Single example: messages is a list of dicts [{"role":..}, ..]
+        # Batched: messages is a list of lists [[{"role":..}, ..], ..]
+        if messages and isinstance(messages[0], dict):
+            return [tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=False
+            )]
         texts = []
-        for msgs in examples["messages"]:
+        for msgs in messages:
             texts.append(tokenizer.apply_chat_template(
                 msgs, tokenize=False, add_generation_prompt=False
             ))
