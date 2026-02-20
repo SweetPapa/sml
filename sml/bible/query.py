@@ -69,12 +69,17 @@ class Bible:
 
     def search_fuzzy(self, text: str, limit: int = 5) -> list[dict]:
         """FTS5 fuzzy search on surface_text."""
+        # Strip characters that are FTS5 syntax (quotes, asterisks, etc.)
+        sanitized = "".join(c for c in text if c.isalnum() or c in (" ", "-", "_"))
+        sanitized = sanitized.strip()
+        if not sanitized:
+            return []
         rows = self.conn.execute(
             """SELECT c.* FROM concepts_fts fts
                JOIN concepts c ON fts.rowid = c.id
                WHERE concepts_fts MATCH ?
                ORDER BY rank LIMIT ?""",
-            (f"{text}*", limit),
+            (f"{sanitized}*", limit),
         ).fetchall()
         return [dict(r) for r in rows]
 
