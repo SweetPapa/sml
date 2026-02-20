@@ -102,10 +102,13 @@ def main():
         report_to="none",
     )
 
-    def formatting_func(example):
-        return tokenizer.apply_chat_template(
-            example["messages"], tokenize=False, add_generation_prompt=False
-        )
+    def formatting_func(examples):
+        texts = []
+        for msgs in examples["messages"]:
+            texts.append(tokenizer.apply_chat_template(
+                msgs, tokenize=False, add_generation_prompt=False
+            ))
+        return texts
 
     trainer = SFTTrainer(
         model=model,
