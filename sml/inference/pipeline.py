@@ -94,6 +94,10 @@ class SMLPipeline:
 
         return result
 
+    # Regex for corrupted response tags the model sometimes produces
+    _RESPONSE_TAG_RE = re.compile(r"<s?p?o?n?s?e?response>|<sresponse>|<sponse>")
+    _RESPONSE_CLOSE_RE = re.compile(r"</s?p?o?n?s?e?response>|</sresponse>|</sponse>")
+
     def _parse_output(self, text: str) -> dict:
         """Parse model output into thinking and response sections."""
         thinking = ""
@@ -104,22 +108,26 @@ class SMLPipeline:
         if thinking_match:
             thinking = thinking_match.group(1).strip()
 
-        # Extract <response> block
+        # Extract <response> block (exact tags)
         response_match = re.search(r"<response>(.*?)</response>", text, re.DOTALL)
         if response_match:
             response = response_match.group(1).strip()
 
-        # Fallback: thinking found but no <response> tags — take text after </thinking>
+        # Fallback: thinking found but no clean <response> tags — take text after </thinking>
         if thinking and not response and "</thinking>" in text:
             after = text[text.index("</thinking>") + len("</thinking>"):].strip()
-            after = re.sub(r"</?response>", "", after).strip()
-            if after:
-                response = after
+            response = after
 
         # Fallback: no tags at all — strip SML and use raw text
         if not response:
             clean = re.sub(r"<sml>.*?</sml>", "", text, flags=re.DOTALL).strip()
             response = clean
+
+        # Clean corrupted response tags from the model output
+        response = self._RESPONSE_TAG_RE.sub("", response)
+        response = self._RESPONSE_CLOSE_RE.sub("", response)
+        response = re.sub(r"</?response>", "", response)
+        response = response.strip()
 
         return {"thinking": thinking, "response": response}
 

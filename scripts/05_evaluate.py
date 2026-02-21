@@ -325,6 +325,8 @@ def run_test_category(
             "grade": grade,
             "expected_keywords": keywords,
             "response_preview": result["response"][:150],
+            "thinking_preview": result["thinking"][:150] if result.get("thinking") else "",
+            "raw_output": result.get("raw_output", "")[:500],
         }
         results["details"].append(detail)
 
