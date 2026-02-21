@@ -116,8 +116,8 @@ DEFAULT_TRAINING_ARGS = {
 # --- Groq config ---
 GROQ_CONFIG = {
     "model": os.environ.get("GROQ_MODEL", "meta-llama/llama-4-maverick-17b-128e-instruct"),
-    "max_tokens": 4096,
-    "temperature": 0.7,
+    "max_tokens": 8192,
+    "temperature": 0.6,
 }
 
 # --- Groq parallelization config (loaded from .env with Developer tier defaults) ---
