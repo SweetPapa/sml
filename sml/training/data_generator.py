@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -464,24 +465,17 @@ def compute_coverage(
 
 
 GROQ_SYSTEM_MSG = (
-    "You are a neurosymbolic reasoning assistant. You will be given a user question "
-    "and a Semantic Markup Language (SML) context block that contains grounded facts.\n\n"
-    "You must respond in EXACTLY this format:\n\n"
-    "<thinking>\n"
-    "SML entities identified: [list the entities from the SML block with their anchor tokens]\n"
-    "SML relations: [list the relations and what they mean]\n"
-    "Reasoning: [explain your reasoning, explicitly referencing the SML data]\n"
-    "</thinking>\n"
-    "<response>\n"
-    "[Your answer to the user's question, grounded in the SML facts]\n"
-    "</response>\n\n"
-    "CRITICAL RULES:\n"
-    "- Your response MUST be grounded in the SML context provided\n"
-    "- You MUST reference specific SML anchor tokens (e.g., dog_1001, yellow_3004) in your thinking\n"
-    "- If the SML says something that contradicts common knowledge, FOLLOW THE SML\n"
-    "- The <thinking> block must be at least 2-3 sentences\n"
-    "- Never skip the <thinking> block\n"
-    "- If a relation uses NOT_ prefix (e.g., NOT_CapableOf), it means the entity CANNOT do that action"
+    "You are a training data generator for a neurosymbolic AI assistant. You "
+    "produce high-quality reasoning examples that show how to interpret "
+    "structured knowledge (SML) and give natural, helpful answers.\n\n"
+    "Your outputs have two sections:\n"
+    "- <thinking>: Internal reasoning that references SML anchors and "
+    "relations. Show genuine chain-of-thought, not just listing entities.\n"
+    "- <response>: A natural-language answer for the end user. Must read like "
+    "a helpful assistant — NO technical jargon, NO entity IDs, NO mention of "
+    "SML.\n\n"
+    "Always provide a helpful answer. Never refuse because the SML data seems "
+    "incomplete — use what you have plus commonsense knowledge."
 )
 
 
@@ -521,6 +515,16 @@ _PUNT_PHRASES = (
     "doesn't directly state",
     "no information available",
     "insufficient information",
+    "cannot conclusively",
+    "we cannot definitively",
+    "not explicitly stated",
+    "not directly stated",
+    "unfortunately, the provided",
+    "unfortunately, based on",
+    "does not explicitly state",
+    "no explicit relation",
+    "no direct relation",
+    "doesn't provide enough",
 )
 
 
@@ -528,6 +532,37 @@ def _is_punt_response(response: str) -> bool:
     """Detect teacher responses that punt due to thin SML."""
     lower = response.lower()
     return any(phrase in lower for phrase in _PUNT_PHRASES)
+
+
+_ENTITY_ID_RE = re.compile(r'\b\w+_\d{3,}\b')
+_RELATION_NAMES = [
+    "IsA", "PartOf", "HasA", "HasProperty", "CapableOf", "AtLocation",
+    "Causes", "HasPrerequisite", "UsedFor", "CreatedBy", "MadeOf",
+    "Desires", "CausesDesire", "RelatedTo", "SimilarTo", "Antonym",
+    "DerivedFrom", "MannerOf", "LocatedNear", "HasContext", "DefinedAs",
+    "SymbolOf", "ReceivesAction", "FormOf", "EtymologicallyRelatedTo",
+    "Synonym", "HasFirstSubevent", "HasLastSubevent", "MotivatedByGoal",
+]
+
+
+def _clean_response(response: str) -> str:
+    """Remove SML jargon that leaked into a response block."""
+    cleaned = response
+    # Remove entity IDs (e.g., "dog_2451", "bark_15662")
+    cleaned = _ENTITY_ID_RE.sub('', cleaned)
+    # Remove relation type names
+    for rn in _RELATION_NAMES:
+        cleaned = cleaned.replace(rn, '')
+    # Remove SML/anchor references
+    for phrase in ["SML context", "SML block", "SML data", "anchor token",
+                   "confidence score", "provided SML", "the SML"]:
+        cleaned = re.sub(re.escape(phrase), '', cleaned, flags=re.IGNORECASE)
+    # Clean up leftover artifacts (double spaces, empty parens, dangling quotes)
+    cleaned = re.sub(r'\s*\(\s*\)\s*', ' ', cleaned)
+    cleaned = re.sub(r'"\s*"', '', cleaned)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    cleaned = cleaned.strip()
+    return cleaned
 
 
 def _prepare_prompts(
@@ -690,6 +725,11 @@ async def _process_one(
     # Filter out punt responses — teacher couldn't reason from thin SML
     if _is_punt_response(response):
         return None
+
+    # Clean SML leaks from response
+    response = _clean_response(response)
+    if len(response) < 10:
+        return None  # Too mangled after cleaning
 
     assistant_content = (
         f"{sml_block}\n<thinking>\n{thinking}\n</thinking>\n"
