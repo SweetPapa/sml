@@ -86,8 +86,8 @@ class SMLPipeline:
         new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
         raw_output = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-        # Step 4: Parse the output
-        full_output = sml_block + "\n" + raw_output
+        # Step 4: Parse the output — re-add <thinking> tag that was in the prompt
+        full_output = sml_block + "\n<thinking>\n" + raw_output
         result = self._parse_output(full_output)
         result["sml_block"] = sml_block
         result["raw_output"] = raw_output
@@ -109,9 +109,15 @@ class SMLPipeline:
         if response_match:
             response = response_match.group(1).strip()
 
-        # Fallback: if no tags, use the raw output as response
+        # Fallback: thinking found but no <response> tags — take text after </thinking>
+        if thinking and not response and "</thinking>" in text:
+            after = text[text.index("</thinking>") + len("</thinking>"):].strip()
+            after = re.sub(r"</?response>", "", after).strip()
+            if after:
+                response = after
+
+        # Fallback: no tags at all — strip SML and use raw text
         if not response:
-            # Remove any SML block from the text
             clean = re.sub(r"<sml>.*?</sml>", "", text, flags=re.DOTALL).strip()
             response = clean
 
