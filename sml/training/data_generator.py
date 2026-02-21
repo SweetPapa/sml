@@ -716,20 +716,25 @@ async def _process_one(
         client, messages, rate_limiter, max_retries, initial_backoff,
     )
     if not content:
+        logger.debug("[idx=%d] Groq returned no content", idx)
         return None
 
     thinking, response = _parse_teacher_response(content)
     if not thinking or not response:
+        logger.debug("[idx=%d] Parse failed — thinking=%d response=%d chars. Raw: %.200s",
+                     idx, len(thinking), len(response), content)
         return None
 
     # Filter out punt responses — teacher couldn't reason from thin SML
     if _is_punt_response(response):
+        logger.debug("[idx=%d] Punt detected: %.100s", idx, response)
         return None
 
     # Clean SML leaks from response
     response = _clean_response(response)
     if len(response) < 10:
-        return None  # Too mangled after cleaning
+        logger.debug("[idx=%d] Response too short after cleaning (%d chars)", idx, len(response))
+        return None
 
     assistant_content = (
         f"{sml_block}\n<thinking>\n{thinking}\n</thinking>\n"

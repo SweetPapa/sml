@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CLI: Generate SML training data using the inverted pipeline."""
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -40,7 +41,16 @@ def main():
         "--mode", choices=["test", "full"], default=None,
         help="Preset: 'test' (50 examples) or 'full' (15000 examples)"
     )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Enable debug logging for failure diagnostics"
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     # Override num_examples based on mode preset
     if args.mode == "test":
