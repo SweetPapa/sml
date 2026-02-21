@@ -927,9 +927,16 @@ def _parse_teacher_response(response: str) -> tuple[str, str]:
         end = response.index("</response>")
         answer = response[start:end].strip()
 
-    # Fallback: if no tags, treat the whole thing as the response
+    # Fallback: thinking found but no <response> tags — take everything after </thinking>
+    if thinking and not answer and "</thinking>" in response:
+        after = response[response.index("</thinking>") + len("</thinking>"):].strip()
+        # Strip <response>/ </response> if only one is present
+        after = after.replace("<response>", "").replace("</response>", "").strip()
+        if after:
+            answer = after
+
+    # Fallback: no tags at all — split in half
     if not thinking and not answer:
-        # Split at a reasonable point
         lines = response.strip().split("\n")
         if len(lines) > 2:
             thinking = "\n".join(lines[:len(lines)//2])
