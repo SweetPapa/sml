@@ -66,8 +66,8 @@ class SMLPipeline:
             messages, tokenize=False, add_generation_prompt=True
         )
 
-        # Prepend SML block and force <thinking> start in the assistant's turn
-        prompt_text += sml_block + "\n<thinking>\n"
+        # Prepend SML block and force <think> start in the assistant's turn
+        prompt_text += sml_block + "\n<think>\n"
 
         # Step 3: Tokenize and generate
         inputs = self.tokenizer(prompt_text, return_tensors="pt").to(self.model.device)
@@ -86,8 +86,8 @@ class SMLPipeline:
         new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
         raw_output = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-        # Step 4: Parse the output — re-add <thinking> tag that was in the prompt
-        full_output = sml_block + "\n<thinking>\n" + raw_output
+        # Step 4: Parse the output — re-add <think> tag that was in the prompt
+        full_output = sml_block + "\n<think>\n" + raw_output
         result = self._parse_output(full_output)
         result["sml_block"] = sml_block
         result["raw_output"] = raw_output
@@ -103,8 +103,8 @@ class SMLPipeline:
         thinking = ""
         response = ""
 
-        # Extract <thinking> block
-        thinking_match = re.search(r"<thinking>(.*?)</thinking>", text, re.DOTALL)
+        # Extract <think> block
+        thinking_match = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
         if thinking_match:
             thinking = thinking_match.group(1).strip()
 
@@ -113,9 +113,9 @@ class SMLPipeline:
         if response_match:
             response = response_match.group(1).strip()
 
-        # Fallback: thinking found but no clean <response> tags — take text after </thinking>
-        if thinking and not response and "</thinking>" in text:
-            after = text[text.index("</thinking>") + len("</thinking>"):].strip()
+        # Fallback: thinking found but no clean <response> tags — take text after </think>
+        if thinking and not response and "</think>" in text:
+            after = text[text.index("</think>") + len("</think>"):].strip()
             response = after
 
         # Fallback: no tags at all — strip SML and use raw text

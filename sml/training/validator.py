@@ -100,23 +100,23 @@ def _validate_example(example: dict, bible: Bible, line_num: int) -> list[str]:
         return [f"Line {line_num}: Missing <sml> block in assistant response"]
 
     # Check for thinking and response blocks
-    if "<thinking>" not in content or "</thinking>" not in content:
-        errors.append(f"Line {line_num}: Missing <thinking> block")
+    if "<think>" not in content or "</think>" not in content:
+        errors.append(f"Line {line_num}: Missing <think> block")
     if "<response>" not in content or "</response>" not in content:
         errors.append(f"Line {line_num}: Missing <response> block")
 
     # Check thinking block quality (warnings, not errors)
     warnings = []
-    if "<thinking>" in content and "</thinking>" in content:
-        think_start = content.index("<thinking>") + len("<thinking>")
-        think_end = content.index("</thinking>")
+    if "<think>" in content and "</think>" in content:
+        think_start = content.index("<think>") + len("<think>")
+        think_end = content.index("</think>")
         thinking_text = content[think_start:think_end].strip()
 
         # Check minimum length (>= 20 tokens)
         thinking_tokens = thinking_text.split()
         if len(thinking_tokens) < 20:
             warnings.append(
-                f"Line {line_num}: WARNING: <thinking> block too short "
+                f"Line {line_num}: WARNING: <think> block too short "
                 f"({len(thinking_tokens)} tokens, need >=20)"
             )
 
@@ -133,7 +133,7 @@ def _validate_example(example: dict, bible: Bible, line_num: int) -> list[str]:
                 has_anchor_ref = any(a in thinking_text for a in anchors)
                 if not has_anchor_ref:
                     warnings.append(
-                        f"Line {line_num}: WARNING: <thinking> block does not reference "
+                        f"Line {line_num}: WARNING: <think> block does not reference "
                         f"any SML anchor tokens"
                     )
 

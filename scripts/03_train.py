@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SML QLoRA Fine-Tuning Script — trains Qwen2.5-3B-Instruct on SML data."""
+"""SML QLoRA Fine-Tuning Script — trains Qwen3-4B on SML data."""
 import argparse
 import sys
 from pathlib import Path
@@ -11,7 +11,7 @@ from sml.config import DEFAULT_TRAINING_ARGS, TRAINING_DATA_PATH, DATA_DIR
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fine-tune Qwen2.5-3B on SML training data")
+    parser = argparse.ArgumentParser(description="Fine-tune Qwen3-4B on SML training data")
     parser.add_argument("--data", type=str, default=str(TRAINING_DATA_PATH),
                         help="Path to training JSONL file")
     parser.add_argument("--output", type=str, default=str(DATA_DIR / "model_output"),

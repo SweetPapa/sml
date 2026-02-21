@@ -469,7 +469,7 @@ GROQ_SYSTEM_MSG = (
     "produce high-quality reasoning examples that show how to interpret "
     "structured knowledge (SML) and give natural, helpful answers.\n\n"
     "Your outputs have two sections:\n"
-    "- <thinking>: Internal reasoning that references SML anchors and "
+    "- <think>: Internal reasoning that references SML anchors and "
     "relations. Show genuine chain-of-thought, not just listing entities.\n"
     "- <response>: A natural-language answer for the end user. Must read like "
     "a helpful assistant — NO technical jargon, NO entity IDs, NO mention of "
@@ -737,7 +737,7 @@ async def _process_one(
         return None
 
     assistant_content = (
-        f"{sml_block}\n<thinking>\n{thinking}\n</thinking>\n"
+        f"{sml_block}\n<think>\n{thinking}\n</think>\n"
         f"<response>\n{response}\n</response>"
     )
     return {
@@ -817,7 +817,7 @@ def generate_training_data(
 
     1. Take prompts
     2. Run each through SML Encoder → deterministic <sml> block (serial, fast)
-    3. Send prompt + SML block to Groq concurrently → get <thinking> + <response>
+    3. Send prompt + SML block to Groq concurrently → get <think> + <response>
     4. Assemble full training tuples in ChatML format, saved incrementally
 
     Parallelization is controlled by GROQ_PARALLEL config (from .env):
@@ -915,10 +915,10 @@ def _parse_teacher_response(response: str) -> tuple[str, str]:
     thinking = ""
     answer = ""
 
-    # Try to extract <thinking> block
-    if "<thinking>" in response and "</thinking>" in response:
-        start = response.index("<thinking>") + len("<thinking>")
-        end = response.index("</thinking>")
+    # Try to extract <think> block
+    if "<think>" in response and "</think>" in response:
+        start = response.index("<think>") + len("<think>")
+        end = response.index("</think>")
         thinking = response[start:end].strip()
 
     # Try to extract <response> block
@@ -927,9 +927,9 @@ def _parse_teacher_response(response: str) -> tuple[str, str]:
         end = response.index("</response>")
         answer = response[start:end].strip()
 
-    # Fallback: thinking found but no <response> tags — take everything after </thinking>
-    if thinking and not answer and "</thinking>" in response:
-        after = response[response.index("</thinking>") + len("</thinking>"):].strip()
+    # Fallback: thinking found but no <response> tags — take everything after </think>
+    if thinking and not answer and "</think>" in response:
+        after = response[response.index("</think>") + len("</think>"):].strip()
         # Strip <response>/ </response> if only one is present
         after = after.replace("<response>", "").replace("</response>", "").strip()
         if after:

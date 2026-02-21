@@ -90,7 +90,7 @@ RELATION_TYPES_INV = {v: k for k, v in RELATION_TYPES.items()}
 
 # --- Training hyperparameters ---
 DEFAULT_TRAINING_ARGS = {
-    "model_name": "unsloth/Qwen2.5-3B-Instruct-bnb-4bit",
+    "model_name": "unsloth/Qwen3-4B-bnb-4bit",
     "max_seq_length": 4096,
     "lora_r": 128,
     "lora_alpha": 256,
@@ -136,14 +136,14 @@ SML_SYSTEM_PROMPT = (
     "will also receive an SML context block containing relevant entities and "
     "relationships.\n\n"
     "Your process:\n"
-    "1. Write a <thinking> block where you interpret the SML data and reason "
+    "1. Write a <think> block where you interpret the SML data and reason "
     "through the answer. Reference entity anchors and relationships here to "
     "show your work.\n"
     "2. Write a <response> block with a clear, natural-language answer. This is "
     "what the user sees — write conversationally as a knowledgeable assistant. "
     "NEVER mention SML, entity IDs, anchor tokens, confidence scores, or "
     "relation type names in your response.\n\n"
-    "The <thinking> block is your internal scratchpad. The <response> block is "
+    "The <think> block is your internal scratchpad. The <response> block is "
     "your public answer."
 )
 
@@ -151,13 +151,13 @@ SML_SYSTEM_PROMPT = (
 TEACHER_PROMPT_TEMPLATE = (
     "You are generating training data for a neurosymbolic AI. Given a user "
     "question and an SML fact sheet, produce a response in two parts.\n\n"
-    "<thinking>\n"
+    "<think>\n"
     "Analyze the SML entities and relations. What do the anchors and "
     "relationships tell you? Reason through the answer step by step, "
     "referencing specific anchors (e.g., dog_2451, bark_15662) and relation "
     "types (e.g., CapableOf, AtLocation). If the SML data is thin, combine "
     "it with commonsense reasoning.\n"
-    "</thinking>\n"
+    "</think>\n"
     "<response>\n"
     "Answer the user's question in plain, natural language. Be conversational "
     "and helpful — like a knowledgeable friend. NEVER mention SML, entity IDs "
@@ -166,7 +166,7 @@ TEACHER_PROMPT_TEMPLATE = (
     "no idea SML exists.\n"
     "</response>\n\n"
     "RULES:\n"
-    "- The <thinking> block MUST reference specific SML anchor tokens and "
+    "- The <think> block MUST reference specific SML anchor tokens and "
     "explain your reasoning\n"
     "- The <response> block MUST be pure natural language — no SML jargon "
     "whatsoever\n"
