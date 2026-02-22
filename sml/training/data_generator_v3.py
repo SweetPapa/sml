@@ -627,10 +627,22 @@ def _validate_v3_example(record: dict) -> list[str]:
             entities = parsed["entities"]
             relations = parsed["relations"]
 
+            if not relations:
+                errors.append("SML block has 0 relations")
+
             for e in entities:
                 if len(e) != 8:
                     errors.append(f"EDA width {len(e)} != 8")
                     break
+
+            # Check for duplicate relations
+            ra_keys = set()
+            for r in relations:
+                key = (r[0], r[1], r[2]) if len(r) >= 3 else None
+                if key and key in ra_keys:
+                    errors.append(f"duplicate relation {key}")
+                if key:
+                    ra_keys.add(key)
 
             for r in relations:
                 if len(r) != 6:
@@ -648,12 +660,34 @@ def _validate_v3_example(record: dict) -> list[str]:
     else:
         errors.append("could not extract SML block from user message")
 
-    # Think block word count
+    # Think block word count + cross-check against SML
     think_match = re.search(r"<think>(.*?)</think>", assistant_content, re.DOTALL)
     if think_match:
-        think_words = think_match.group(1).split()
+        think_text = think_match.group(1)
+        think_words = think_text.split()
         if len(think_words) < 50:
             errors.append(f"think block too short ({len(think_words)} words)")
+
+        # Cross-check: if SML has 0 relations, think block should not
+        # claim relations exist (hallucination guard)
+        if sml_match:
+            parsed_check = parse_sml_block(sml_match.group())
+            sml_rel_types = set()
+            for r in parsed_check["relations"]:
+                rt = r[0]
+                if isinstance(rt, int):
+                    sml_rel_types.add(RELATION_TYPES.get(rt, str(rt)))
+                else:
+                    sml_rel_types.add(str(rt))
+            # If no relations in SML but think block references specific
+            # relation types, it's hallucinating
+            if not parsed_check["relations"]:
+                for rn in _RELATION_NAMES:
+                    if rn in think_text:
+                        errors.append(
+                            f"think references '{rn}' but SML has 0 relations"
+                        )
+                        break
     else:
         errors.append("could not extract think block")
 

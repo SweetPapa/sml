@@ -34,6 +34,9 @@ _FICTIONAL_WORDS = [
     "stelvox", "trovixe",
 ]
 
+# Minimum weight for relations to be considered "strong"
+_MIN_STRONG_WEIGHT = 0.5
+
 
 class ClusterSelector:
     """Selects concept clusters from the Bible for V3 training data."""
@@ -65,19 +68,25 @@ class ClusterSelector:
         self.close()
 
     def _load_rich_concepts(self):
-        """Load concepts with >= 5 outgoing relations AND >= 2 distinct types."""
+        """Load concepts with >= 5 outgoing relations, >= 2 distinct types,
+        and at least 2 relations with weight >= 0.5."""
         rows = self.conn.execute("""
             SELECT c.id, c.surface_text, c.anchor_token, c.domain, c.category,
                    c.subcategory, c.specificity, c.definition,
                    COUNT(DISTINCT r.relation_type_id) AS type_count,
-                   COUNT(r.id) AS total_rels
+                   COUNT(r.id) AS total_rels,
+                   SUM(CASE WHEN r.weight >= 0.5 THEN 1 ELSE 0 END) AS strong_rels
             FROM concepts c
             JOIN relations r ON r.source_id = c.id
             GROUP BY c.id
-            HAVING total_rels >= 5 AND type_count >= 2
+            HAVING total_rels >= 5 AND type_count >= 2 AND strong_rels >= 2
             ORDER BY type_count DESC, total_rels DESC
         """).fetchall()
-        self._rich_concepts = [dict(r) for r in rows]
+        rich = [dict(r) for r in rows]
+        # Sort: prefer concepts with populated domain (non-zero) first,
+        # then by strong_rels descending
+        rich.sort(key=lambda c: (c["domain"] == 0, -c["strong_rels"]))
+        self._rich_concepts = rich
 
     def _load_relations_index(self):
         """Build source_id -> relations index."""
@@ -96,7 +105,8 @@ class ClusterSelector:
             self._relations_by_source.setdefault(d["source_id"], []).append(d)
 
     def _load_multi_hop_chains(self):
-        """Pre-compute multi-hop chains (A -> B -> C) for Category C."""
+        """Pre-compute multi-hop chains (A -> B -> C) for Category C.
+        Both hops must have weight >= 0.5."""
         rows = self.conn.execute("""
             SELECT c1.id, c1.surface_text, c1.anchor_token,
                    c1.domain as c1_domain, c1.category as c1_category,
@@ -117,7 +127,7 @@ class ClusterSelector:
             JOIN concepts c2 ON r1.target_id = c2.id
             JOIN relations r2 ON r2.source_id = c2.id
             JOIN concepts c3 ON r2.target_id = c3.id
-            WHERE r1.weight >= 0.3 AND r2.weight >= 0.3
+            WHERE r1.weight >= 0.5 AND r2.weight >= 0.5
               AND c1.id != c3.id AND c1.id != c2.id
               AND r1.relation_type_id != r2.relation_type_id
             ORDER BY (r1.weight + r2.weight) DESC
@@ -146,7 +156,7 @@ class ClusterSelector:
         self._antonym_pairs = [dict(r) for r in rows]
 
     def _get_best_modifier(self, concept_id: int) -> int:
-        """Get the best modifier (anchor token ID) from HasProperty relations."""
+        """Get the best modifier (anchor token) from HasProperty relations."""
         rels = self._relations_by_source.get(concept_id, [])
         for rel in rels:
             if rel["relation_type_id"] == 4:  # HasProperty
@@ -156,7 +166,7 @@ class ClusterSelector:
         return 0
 
     def _get_inter_relations(self, concept_ids: set[int]) -> list[dict]:
-        """Get all relations between a set of concept IDs."""
+        """Get all relations between a set of concept IDs, deduplicated."""
         if len(concept_ids) < 2:
             return []
         placeholders = ",".join("?" * len(concept_ids))
@@ -165,28 +175,41 @@ class ClusterSelector:
             FROM relations r
             WHERE r.source_id IN ({placeholders}) AND r.target_id IN ({placeholders})
         """, list(concept_ids) + list(concept_ids)).fetchall()
-        return [dict(r) for r in rows]
+
+        # Deduplicate by (source_id, target_id, relation_type_id), keep highest weight
+        best: dict[tuple, dict] = {}
+        for row in rows:
+            d = dict(row)
+            key = (d["source_id"], d["target_id"], d["relation_type_id"])
+            if key not in best or d["weight"] > best[key]["weight"]:
+                best[key] = d
+        return list(best.values())
 
     def _build_sml_block(
         self,
         concepts: list[dict],
         relations: list[dict],
     ) -> str:
-        """Build an SML block from concepts and relations."""
+        """Build an SML block from concepts and relations.
+
+        Entity confidence uses max weight of involved relations (floored at 0.5).
+        Relations are deduplicated by (type, src_idx, tgt_idx).
+        """
         concept_id_to_idx = {}
         entities = []
         for i, c in enumerate(concepts):
             concept_id_to_idx[c["id"]] = i
             mod1 = self._get_best_modifier(c["id"])
-            confidence = 0.85  # default
-            # Use min weight of relations involving this concept
+            # Use max weight of relations involving this concept
             involved_weights = [
                 r["weight"] for r in relations
                 if r.get("source_id") == c["id"] or r.get("target_id") == c["id"]
             ]
             if involved_weights:
-                confidence = round(min(involved_weights), 2)
-                confidence = max(confidence, 0.3)  # floor at 0.3
+                confidence = round(max(involved_weights), 2)
+                confidence = max(confidence, 0.5)  # floor at 0.5
+            else:
+                confidence = 0.85  # default when no relations touch this entity
             entities.append([
                 c.get("domain", 0), c.get("category", 0),
                 c.get("subcategory", 0), c.get("specificity", 0),
@@ -194,40 +217,55 @@ class ClusterSelector:
                 mod1, 0, confidence,
             ])
 
-        ra_list = []
+        # Deduplicate relations by (type, src_idx, tgt_idx), keep highest weight
+        seen_ra: dict[tuple, list] = {}
         for rel in relations:
             src_idx = concept_id_to_idx.get(rel["source_id"])
             tgt_idx = concept_id_to_idx.get(rel["target_id"])
             if src_idx is None or tgt_idx is None:
                 continue
             negation = rel.get("negation", 0)
-            ra_list.append([
-                rel["relation_type_id"], src_idx, tgt_idx,
-                rel["weight"], 0, negation,
-            ])
+            key = (rel["relation_type_id"], src_idx, tgt_idx)
+            entry = [rel["relation_type_id"], src_idx, tgt_idx, rel["weight"], 0, negation]
+            if key not in seen_ra or rel["weight"] > seen_ra[key][3]:
+                seen_ra[key] = entry
+
+        ra_list = list(seen_ra.values())
 
         if not entities:
             return "<sml>\n</sml>"
 
         return format_sml_block(entities, ra_list)
 
+    def _has_relations(self, sml_block: str) -> bool:
+        """Check that an SML block contains at least one R(...) line."""
+        return "\nR(" in sml_block
+
     # ── Category A: Standard Grounding ──────────────────────────────────────
 
     def _select_category_a(self, count: int) -> list[ConceptCluster]:
-        """Select standard grounding clusters from rich concepts."""
+        """Select standard grounding clusters from rich concepts.
+        Only picks neighbors via relations with weight >= 0.4."""
         clusters = []
         candidates = list(self._rich_concepts)
         self.rng.shuffle(candidates)
-        seeds = candidates[:count]
 
-        for seed in seeds:
+        for seed in candidates:
+            if len(clusters) >= count:
+                break
+
             rels = self._relations_by_source.get(seed["id"], [])
             if not rels:
                 continue
 
-            # Group by relation type, pick best from each type
+            # Only consider relations with meaningful weight
+            strong_rels = [r for r in rels if r["weight"] >= 0.4]
+            if not strong_rels:
+                continue
+
+            # Group by relation type, pick best (highest weight) from each type
             by_type: dict[int, list[dict]] = {}
-            for r in rels:
+            for r in strong_rels:
                 by_type.setdefault(r["relation_type_id"], []).append(r)
 
             # Take top 1-3 neighbors with diverse types
@@ -272,6 +310,10 @@ class ClusterSelector:
 
             sml_block = self._build_sml_block(all_concepts, inter_rels)
 
+            # Skip if no relations ended up in the SML block
+            if not self._has_relations(sml_block):
+                continue
+
             cluster = ConceptCluster(
                 category="A",
                 seed_concept={
@@ -295,7 +337,12 @@ class ClusterSelector:
     # ── Category B: Novel/Fictional ─────────────────────────────────────────
 
     def _select_category_b(self, count: int) -> list[ConceptCluster]:
-        """Select clusters with a fictional anchor mixed with real concepts."""
+        """Select clusters with a fictional anchor mixed with real concepts.
+
+        Borrowed relations point FROM the fictional concept TO real concepts
+        that are already in the cluster, so _build_sml_block can resolve all
+        target indices.
+        """
         clusters = []
         candidates = list(self._rich_concepts)
         self.rng.shuffle(candidates)
@@ -336,29 +383,44 @@ class ClusterSelector:
                 "definition": "",
             }
 
-            # Copy 2-3 relations from a real concept to the fictional one
+            # Build borrowed relations: fictional -> each real concept
+            # Use donor's relation types but point at concepts IN the cluster
             donor = real_concepts[0]
             donor_rels = self._relations_by_source.get(donor["id"], [])
+            # Pick diverse relation types from donor
+            used_types = set()
             borrowed_rels = []
-            for rel in donor_rels[:3]:
+            real_ids = [c["id"] for c in real_concepts]
+            for rel in donor_rels:
+                if rel["relation_type_id"] in used_types:
+                    continue
+                if len(borrowed_rels) >= min(3, len(real_concepts)):
+                    break
+                # Point at the next real concept in the cluster
+                target_id = real_ids[len(borrowed_rels) % len(real_ids)]
                 borrowed_rels.append({
                     "source_id": fictional_concept["id"],
-                    "target_id": rel["target_concept_id"],
+                    "target_id": target_id,
                     "relation_type_id": rel["relation_type_id"],
-                    "weight": round(rel["weight"] * 0.8, 2),  # slightly reduced
+                    "weight": round(min(rel["weight"] * 0.8, 0.95), 2),
                     "negation": 0,
                 })
+                used_types.add(rel["relation_type_id"])
 
             all_concepts = [fictional_concept] + real_concepts
 
             # Also get inter-relations among real concepts
-            real_ids = {c["id"] for c in real_concepts}
-            inter_rels = self._get_inter_relations(real_ids)
+            real_id_set = {c["id"] for c in real_concepts}
+            inter_rels = self._get_inter_relations(real_id_set)
 
             # Combine borrowed + inter relations
             all_rels = borrowed_rels + inter_rels
 
             sml_block = self._build_sml_block(all_concepts, all_rels)
+
+            # Skip if no relations ended up in the SML block
+            if not self._has_relations(sml_block):
+                continue
 
             cluster = ConceptCluster(
                 category="B",
@@ -519,8 +581,8 @@ class ClusterSelector:
             rels = self._relations_by_source.get(seed["id"], [])
             # Find a CapableOf relation to negate
             capable_rels = [r for r in rels if r["relation_type_id"] == 5]
-            # Also find a TRUE relation to include
-            true_rels = [r for r in rels if r["relation_type_id"] != 5 and r["weight"] >= 0.5]
+            # Also find a TRUE relation to include (must be strong)
+            true_rels = [r for r in rels if r["relation_type_id"] != 5 and r["weight"] >= _MIN_STRONG_WEIGHT]
 
             if not capable_rels or not true_rels:
                 continue
@@ -651,7 +713,7 @@ class ClusterSelector:
             # Also add a true relation for the source if available
             source_rels = self._relations_by_source.get(pair["source_id"], [])
             for r in source_rels:
-                if r["relation_type_id"] != 22 and r["weight"] >= 0.5:
+                if r["relation_type_id"] != 22 and r["weight"] >= _MIN_STRONG_WEIGHT:
                     # Add the target concept if not already present
                     if r["target_concept_id"] != pair["target_id"]:
                         all_concepts.append({
@@ -707,8 +769,8 @@ class ClusterSelector:
             rels = self._relations_by_source.get(seed["id"], [])
             # Find a HasProperty relation to negate
             prop_rels = [r for r in rels if r["relation_type_id"] == 4]
-            # Also find a TRUE relation
-            true_rels = [r for r in rels if r["relation_type_id"] != 4 and r["weight"] >= 0.5]
+            # Also find a TRUE relation (must be strong)
+            true_rels = [r for r in rels if r["relation_type_id"] != 4 and r["weight"] >= _MIN_STRONG_WEIGHT]
 
             if not prop_rels or not true_rels:
                 continue
