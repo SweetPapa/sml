@@ -823,6 +823,12 @@ def generate_v3_training_data(
         actual_by_cat[c.category] = actual_by_cat.get(c.category, 0) + 1
     print(f"  Selected {len(clusters)} clusters: {actual_by_cat}")
 
+    if len(clusters) < total_examples:
+        shortfall = total_examples - len(clusters)
+        print(f"  WARNING: Bible only supports {len(clusters)} unique clusters "
+              f"({shortfall} short of {total_examples} requested).")
+        print(f"  Proceeding with {len(clusters)} examples.")
+
     # Phase 2: LLM generation
     max_concurrent = GROQ_PARALLEL["max_concurrent"]
     rpm_target = GROQ_PARALLEL["rpm_target"]

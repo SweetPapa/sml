@@ -1,5 +1,6 @@
 """Concept cluster selection engine for V3 training data generation."""
 
+import itertools
 import random
 import sqlite3
 from dataclasses import dataclass, field
@@ -35,7 +36,7 @@ _FICTIONAL_WORDS = [
 ]
 
 # Minimum weight for relations to be considered "strong"
-_MIN_STRONG_WEIGHT = 0.5
+_MIN_STRONG_WEIGHT = 0.3
 
 
 class ClusterSelector:
@@ -79,7 +80,7 @@ class ClusterSelector:
             FROM concepts c
             JOIN relations r ON r.source_id = c.id
             GROUP BY c.id
-            HAVING total_rels >= 5 AND type_count >= 2 AND strong_rels >= 2
+            HAVING total_rels >= 3 AND type_count >= 2 AND strong_rels >= 1
             ORDER BY type_count DESC, total_rels DESC
         """).fetchall()
         rich = [dict(r) for r in rows]
@@ -127,11 +128,11 @@ class ClusterSelector:
             JOIN concepts c2 ON r1.target_id = c2.id
             JOIN relations r2 ON r2.source_id = c2.id
             JOIN concepts c3 ON r2.target_id = c3.id
-            WHERE r1.weight >= 0.5 AND r2.weight >= 0.5
+            WHERE r1.weight >= 0.3 AND r2.weight >= 0.3
               AND c1.id != c3.id AND c1.id != c2.id
               AND r1.relation_type_id != r2.relation_type_id
             ORDER BY (r1.weight + r2.weight) DESC
-            LIMIT 1000
+            LIMIT 100000
         """).fetchall()
         self._multi_hop_chains = [dict(r) for r in rows]
 
@@ -245,52 +246,73 @@ class ClusterSelector:
 
     def _select_category_a(self, count: int) -> list[ConceptCluster]:
         """Select standard grounding clusters from rich concepts.
-        Only picks neighbors via relations with weight >= 0.4."""
+
+        Seeds are reused with different neighbor subsets so we can scale
+        beyond the number of unique rich concepts. For each seed we generate
+        combos of (relation_type_subset × neighbor_rank) to maximize variety.
+        """
         clusters = []
         candidates = list(self._rich_concepts)
-        self.rng.shuffle(candidates)
+        if not candidates:
+            return clusters
 
+        # Pre-compute all distinct (seed, neighbor_id_set) combos
+        seed_neighbor_sets: list[tuple[dict, list[dict]]] = []
         for seed in candidates:
+            rels = self._relations_by_source.get(seed["id"], [])
+            strong = [r for r in rels if r["weight"] >= 0.3]
+            if not strong:
+                continue
+            # Group by type, keep top 3 targets per type for variety
+            by_type: dict[int, list[dict]] = {}
+            for r in strong:
+                by_type.setdefault(r["relation_type_id"], []).append(r)
+            for t in by_type:
+                by_type[t].sort(key=lambda r: r["weight"], reverse=True)
+                by_type[t] = by_type[t][:3]
+            type_keys = sorted(by_type.keys())
+            # Generate combos of 1-3 relation types
+            for size in range(1, min(4, len(type_keys) + 1)):
+                for type_combo in itertools.combinations(type_keys, size):
+                    # For each type combo, vary which rank neighbor we pick
+                    # by taking the cartesian product of available targets
+                    per_type_targets = [by_type[t] for t in type_combo]
+                    for target_pick in itertools.product(*per_type_targets):
+                        neighbor_list = []
+                        seen = {seed["id"]}
+                        for rel in target_pick:
+                            tid = rel["target_concept_id"]
+                            if tid not in seen:
+                                neighbor_list.append(rel)
+                                seen.add(tid)
+                        if neighbor_list:
+                            seed_neighbor_sets.append((seed, neighbor_list))
+
+        self.rng.shuffle(seed_neighbor_sets)
+        seen_cluster_keys: set[tuple] = set()
+
+        for seed, neighbor_rels in seed_neighbor_sets:
             if len(clusters) >= count:
                 break
 
-            rels = self._relations_by_source.get(seed["id"], [])
-            if not rels:
+            neighbor_ids = tuple(sorted(r["target_concept_id"] for r in neighbor_rels))
+            cluster_key = (seed["id"], neighbor_ids)
+            if cluster_key in seen_cluster_keys:
                 continue
+            seen_cluster_keys.add(cluster_key)
 
-            # Only consider relations with meaningful weight
-            strong_rels = [r for r in rels if r["weight"] >= 0.4]
-            if not strong_rels:
-                continue
-
-            # Group by relation type, pick best (highest weight) from each type
-            by_type: dict[int, list[dict]] = {}
-            for r in strong_rels:
-                by_type.setdefault(r["relation_type_id"], []).append(r)
-
-            # Take top 1-3 neighbors with diverse types
             neighbors = []
-            seen_ids = {seed["id"]}
-            type_keys = list(by_type.keys())
-            self.rng.shuffle(type_keys)
-            for t in type_keys[:3]:
-                best = max(by_type[t], key=lambda r: r["weight"])
-                tid = best["target_concept_id"]
-                if tid not in seen_ids:
-                    neighbors.append({
-                        "id": tid,
-                        "surface_text": best["target_text"],
-                        "anchor_token": best["target_anchor"],
-                        "domain": best["target_domain"],
-                        "category": best["target_category"],
-                        "subcategory": best["target_subcategory"],
-                        "specificity": best["target_specificity"],
-                        "definition": best.get("target_definition", ""),
-                    })
-                    seen_ids.add(tid)
-
-            if not neighbors:
-                continue
+            for rel in neighbor_rels:
+                neighbors.append({
+                    "id": rel["target_concept_id"],
+                    "surface_text": rel["target_text"],
+                    "anchor_token": rel["target_anchor"],
+                    "domain": rel["target_domain"],
+                    "category": rel["target_category"],
+                    "subcategory": rel["target_subcategory"],
+                    "specificity": rel["target_specificity"],
+                    "definition": rel.get("target_definition", ""),
+                })
 
             all_concepts = [
                 {
@@ -307,10 +329,8 @@ class ClusterSelector:
 
             concept_ids = {c["id"] for c in all_concepts}
             inter_rels = self._get_inter_relations(concept_ids)
-
             sml_block = self._build_sml_block(all_concepts, inter_rels)
 
-            # Skip if no relations ended up in the SML block
             if not self._has_relations(sml_block):
                 continue
 
@@ -339,21 +359,20 @@ class ClusterSelector:
     def _select_category_b(self, count: int) -> list[ConceptCluster]:
         """Select clusters with a fictional anchor mixed with real concepts.
 
-        Borrowed relations point FROM the fictional concept TO real concepts
-        that are already in the cluster, so _build_sml_block can resolve all
-        target indices.
+        Cycles through candidates so we can produce more clusters than
+        unique rich concepts. Each iteration picks different real concept
+        combinations via modular offset.
         """
         clusters = []
         candidates = list(self._rich_concepts)
+        if not candidates:
+            return clusters
         self.rng.shuffle(candidates)
 
         for i in range(count):
-            if i >= len(candidates):
-                break
-
-            # Pick 2-3 real concepts
+            # Pick 2-3 real concepts — cycling through candidates
             num_real = self.rng.randint(2, min(3, len(candidates)))
-            start = i * num_real % len(candidates)
+            start = (i * 7) % len(candidates)  # stride by prime for spread
             real_concepts = []
             for j in range(num_real):
                 idx = (start + j) % len(candidates)
@@ -369,7 +388,7 @@ class ClusterSelector:
                     "definition": c.get("definition", ""),
                 })
 
-            # Generate synthetic anchor
+            # Generate unique synthetic anchor
             word_idx = i % len(_FICTIONAL_WORDS)
             fictional_anchor = f"{_FICTIONAL_WORDS[word_idx]}_{99001 + i}"
             fictional_concept = {
@@ -384,10 +403,8 @@ class ClusterSelector:
             }
 
             # Build borrowed relations: fictional -> each real concept
-            # Use donor's relation types but point at concepts IN the cluster
             donor = real_concepts[0]
             donor_rels = self._relations_by_source.get(donor["id"], [])
-            # Pick diverse relation types from donor
             used_types = set()
             borrowed_rels = []
             real_ids = [c["id"] for c in real_concepts]
@@ -396,7 +413,6 @@ class ClusterSelector:
                     continue
                 if len(borrowed_rels) >= min(3, len(real_concepts)):
                     break
-                # Point at the next real concept in the cluster
                 target_id = real_ids[len(borrowed_rels) % len(real_ids)]
                 borrowed_rels.append({
                     "source_id": fictional_concept["id"],
@@ -409,16 +425,12 @@ class ClusterSelector:
 
             all_concepts = [fictional_concept] + real_concepts
 
-            # Also get inter-relations among real concepts
             real_id_set = {c["id"] for c in real_concepts}
             inter_rels = self._get_inter_relations(real_id_set)
-
-            # Combine borrowed + inter relations
             all_rels = borrowed_rels + inter_rels
 
             sml_block = self._build_sml_block(all_concepts, all_rels)
 
-            # Skip if no relations ended up in the SML block
             if not self._has_relations(sml_block):
                 continue
 
@@ -446,20 +458,28 @@ class ClusterSelector:
     # ── Category C: Multi-Hop ───────────────────────────────────────────────
 
     def _select_category_c(self, count: int) -> list[ConceptCluster]:
-        """Select multi-hop chain clusters (A -> B -> C)."""
+        """Select multi-hop chain clusters (A -> B -> C).
+
+        Each unique chain (c1, c2, c3) triple is a distinct cluster.
+        """
         clusters = []
         chains = list(self._multi_hop_chains)
+        if not chains:
+            return clusters
         self.rng.shuffle(chains)
 
-        seen_seeds = set()
+        seen_triples: set[tuple] = set()
         for chain in chains:
             if len(clusters) >= count:
                 break
 
             c1_id = chain["id"]
-            if c1_id in seen_seeds:
+            c2_id = chain["c2_id"]
+            c3_id = chain["c3_id"]
+            triple = (c1_id, c2_id, c3_id)
+            if triple in seen_triples:
                 continue
-            seen_seeds.add(c1_id)
+            seen_triples.add(triple)
 
             c1 = {
                 "id": chain["id"],
@@ -569,26 +589,38 @@ class ClusterSelector:
         return clusters[:count]
 
     def _select_d1_not_capable(self, count: int) -> list[ConceptCluster]:
-        """D1: Concept + action it CANNOT do."""
+        """D1: Concept + action it CANNOT do.
+
+        Cycles through candidates — same seed can produce multiple clusters
+        if it has multiple CapableOf relations to negate.
+        """
         clusters = []
         candidates = list(self._rich_concepts)
+        if not candidates:
+            return clusters
         self.rng.shuffle(candidates)
 
+        # Build (seed, neg_rel, true_rel) combos
+        combos = []
         for seed in candidates:
-            if len(clusters) >= count:
-                break
-
             rels = self._relations_by_source.get(seed["id"], [])
-            # Find a CapableOf relation to negate
             capable_rels = [r for r in rels if r["relation_type_id"] == 5]
-            # Also find a TRUE relation to include (must be strong)
             true_rels = [r for r in rels if r["relation_type_id"] != 5 and r["weight"] >= _MIN_STRONG_WEIGHT]
-
             if not capable_rels or not true_rels:
                 continue
+            for neg in capable_rels:
+                for true in true_rels[:2]:  # cap at 2 true rels per neg
+                    combos.append((seed, neg, true))
+        self.rng.shuffle(combos)
 
-            neg_rel = self.rng.choice(capable_rels)
-            true_rel = self.rng.choice(true_rels)
+        seen_keys: set[tuple] = set()
+        for seed, neg_rel, true_rel in combos:
+            if len(clusters) >= count:
+                break
+            key = (seed["id"], neg_rel["target_concept_id"], true_rel["target_concept_id"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
 
             seed_concept = {
                 "id": seed["id"],
@@ -667,9 +699,14 @@ class ClusterSelector:
         return clusters
 
     def _select_d2_antonym(self, count: int) -> list[ConceptCluster]:
-        """D2: Concept + antonym pair."""
+        """D2: Concept + antonym pair.
+
+        All unique antonym pairs are available; cycles if needed.
+        """
         clusters = []
         pairs = list(self._antonym_pairs)
+        if not pairs:
+            return clusters
         self.rng.shuffle(pairs)
 
         for pair in pairs:
@@ -757,26 +794,38 @@ class ClusterSelector:
         return clusters
 
     def _select_d3_not_property(self, count: int) -> list[ConceptCluster]:
-        """D3: Concept + property it does NOT have."""
+        """D3: Concept + property it does NOT have.
+
+        Cycles through candidates — same seed can produce multiple clusters
+        if it has multiple HasProperty relations to negate.
+        """
         clusters = []
         candidates = list(self._rich_concepts)
+        if not candidates:
+            return clusters
         self.rng.shuffle(candidates)
 
+        # Build (seed, neg_rel, true_rel) combos
+        combos = []
         for seed in candidates:
-            if len(clusters) >= count:
-                break
-
             rels = self._relations_by_source.get(seed["id"], [])
-            # Find a HasProperty relation to negate
             prop_rels = [r for r in rels if r["relation_type_id"] == 4]
-            # Also find a TRUE relation (must be strong)
             true_rels = [r for r in rels if r["relation_type_id"] != 4 and r["weight"] >= _MIN_STRONG_WEIGHT]
-
             if not prop_rels or not true_rels:
                 continue
+            for neg in prop_rels:
+                for true in true_rels[:2]:
+                    combos.append((seed, neg, true))
+        self.rng.shuffle(combos)
 
-            neg_rel = self.rng.choice(prop_rels)
-            true_rel = self.rng.choice(true_rels)
+        seen_keys: set[tuple] = set()
+        for seed, neg_rel, true_rel in combos:
+            if len(clusters) >= count:
+                break
+            key = (seed["id"], neg_rel["target_concept_id"], true_rel["target_concept_id"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
 
             seed_concept = {
                 "id": seed["id"],
