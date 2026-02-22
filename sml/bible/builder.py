@@ -10,6 +10,8 @@ from typing import Optional
 from sml.bible.schema import create_bible_db
 from sml.config import CONCEPTNET_MIN_WEIGHT, CONCEPTNET_URL
 
+import nltk
+nltk.download('wordnet')
 
 def _parse_conceptnet_uri(uri: str) -> Optional[str]:
     """Extract English surface text from a ConceptNet URI like /c/en/dog."""
