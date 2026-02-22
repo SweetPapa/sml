@@ -80,7 +80,9 @@ class SMLAugmentedHFLM(HFLM):
         try:
             sml_block = self._encode_cached(snippet)
         except Exception:
-            logger.warning("SML encoding failed, passing prompt unchanged", exc_info=True)
+            if not getattr(self, "_warned_encode", False):
+                logger.warning("SML encoding failed, passing prompt unchanged", exc_info=True)
+                self._warned_encode = True
             return text
         return sml_block + "\n" + text
 

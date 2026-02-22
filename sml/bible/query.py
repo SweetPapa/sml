@@ -69,18 +69,29 @@ class Bible:
 
     def search_fuzzy(self, text: str, limit: int = 5) -> list[dict]:
         """FTS5 fuzzy search on surface_text."""
-        # Strip characters that are FTS5 syntax (quotes, asterisks, etc.)
-        sanitized = "".join(c for c in text if c.isalnum() or c in (" ", "-", "_"))
+        # Keep only alphanumeric, spaces, and underscores.
+        # Hyphens and other punctuation are FTS5 operators and must be stripped.
+        sanitized = "".join(c for c in text if c.isalnum() or c in (" ", "_"))
         sanitized = sanitized.strip()
         if not sanitized:
             return []
-        rows = self.conn.execute(
-            """SELECT c.* FROM concepts_fts fts
-               JOIN concepts c ON fts.rowid = c.id
-               WHERE concepts_fts MATCH ?
-               ORDER BY rank LIMIT ?""",
-            (f"{sanitized}*", limit),
-        ).fetchall()
+        # Quote each token so FTS5 treats them as literals, then prefix-match
+        tokens = sanitized.split()
+        if not tokens:
+            return []
+        # Use the last token with prefix *, quote all tokens for safety
+        match_expr = " ".join(f'"{t}"' for t in tokens[:-1])
+        match_expr = (match_expr + " " if match_expr else "") + f'"{tokens[-1]}"*'
+        try:
+            rows = self.conn.execute(
+                """SELECT c.* FROM concepts_fts fts
+                   JOIN concepts c ON fts.rowid = c.id
+                   WHERE concepts_fts MATCH ?
+                   ORDER BY rank LIMIT ?""",
+                (match_expr, limit),
+            ).fetchall()
+        except Exception:
+            return []
         return [dict(r) for r in rows]
 
     def get_concept_by_id(self, concept_id: int) -> Optional[dict]:
