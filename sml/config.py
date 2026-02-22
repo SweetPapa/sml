@@ -181,6 +181,24 @@ TEACHER_PROMPT_TEMPLATE = (
     "SML Context:\n{sml_block}"
 )
 
+# --- V3 Training Data Config ---
+V3_TRAINING_DATA_PATH = DATA_DIR / "training_data_v3.jsonl"
+V3_MANIFEST_PATH = DATA_DIR / "training_data_v3_manifest.json"
+
+V3_SYSTEM_PROMPT = (
+    "You are an AI assistant that uses Structured Markup Language (SML) "
+    "context to ground your reasoning. Always analyze the provided SML "
+    "block before answering."
+)
+
+V3_GROQ_CONFIG = {
+    "model": os.environ.get("GROQ_MODEL_V3", os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")),
+    "max_tokens": int(os.environ.get("GROQ_MAX_TOKENS_V3", "4096")),
+    "temperature": float(os.environ.get("GROQ_TEMPERATURE_V3", "0.7")),
+}
+
+V3_CATEGORY_DISTRIBUTION = {"A": 250, "B": 100, "C": 100, "D": 50}
+
 # --- ConceptNet config ---
 CONCEPTNET_URL = "https://s3.amazonaws.com/conceptnet/downloads/2019/edges/conceptnet-assertions-5.7.0.csv.gz"
 CONCEPTNET_MIN_WEIGHT = 1.0

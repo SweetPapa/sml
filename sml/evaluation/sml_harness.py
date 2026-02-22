@@ -21,6 +21,8 @@ import functools
 import logging
 from typing import Optional
 
+from tqdm import tqdm
+
 from lm_eval.api.registry import register_model
 from lm_eval.models.huggingface import HFLM
 
@@ -61,7 +63,7 @@ class SMLAugmentedHFLM(HFLM):
         self._max_encode = int(max_encode)
 
         # LRU cache keyed on the text snippet — avoids re-encoding
-        # identical prompts across few-shot permutations
+        # identical prompts across answer-choice permutations
         self._encode_cached = functools.lru_cache(maxsize=int(sml_cache))(
             self._sml_encoder.encode
         )
@@ -72,38 +74,68 @@ class SMLAugmentedHFLM(HFLM):
 
     # ── SML injection ──────────────────────────────────────────────────
 
-    def _inject_sml(self, text: str) -> str:
-        """Generate an SML block from *text* and prepend it."""
-        # Encode the tail of the prompt (the actual question, not the
-        # few-shot prefix) to keep SML blocks focused and fast.
-        snippet = text[-self._max_encode :] if len(text) > self._max_encode else text
-        try:
-            sml_block = self._encode_cached(snippet)
-        except Exception:
-            if not getattr(self, "_warned_encode", False):
-                logger.warning("SML encoding failed, passing prompt unchanged", exc_info=True)
-                self._warned_encode = True
-            return text
+    def _get_snippet(self, text: str) -> str:
+        """Extract the tail of the prompt for encoding."""
+        return text[-self._max_encode :] if len(text) > self._max_encode else text
+
+    def _inject_sml(self, text: str, sml_block: str) -> str:
+        """Prepend a pre-computed SML block to the prompt."""
         return sml_block + "\n" + text
+
+    def _encode_batch(self, requests, extract_fn):
+        """Encode SML for all requests, with progress bar and caching.
+
+        extract_fn(req) -> text to encode.
+        Returns list of SML block strings (empty string on failure).
+        """
+        snippets = [self._get_snippet(extract_fn(req)) for req in requests]
+
+        # Deduplicate to avoid redundant spaCy calls
+        unique_snippets = list(set(snippets))
+        sml_map = {}
+
+        desc = f"SML encode ({len(unique_snippets)} unique / {len(snippets)} total)"
+        for snippet in tqdm(unique_snippets, desc=desc, disable=False):
+            try:
+                sml_map[snippet] = self._encode_cached(snippet)
+            except Exception:
+                if not getattr(self, "_warned_encode", False):
+                    logger.warning(
+                        "SML encoding failed for a prompt, passing unchanged",
+                        exc_info=True,
+                    )
+                    self._warned_encode = True
+                sml_map[snippet] = ""
+
+        ci = self._encode_cached.cache_info()
+        logger.info("SML cache: %d hits / %d misses", ci.hits, ci.misses)
+
+        return [sml_map[s] for s in snippets]
 
     # ── Override the three LM API entry-points ─────────────────────────
 
     def loglikelihood(self, requests, disable_tqdm=False):
-        for req in requests:
+        sml_blocks = self._encode_batch(requests, lambda r: r.args[0])
+        for req, sml in zip(requests, sml_blocks):
             ctx, cont = req.args
-            req.arguments = (self._inject_sml(ctx), cont)
+            if sml:
+                req.arguments = (self._inject_sml(ctx, sml), cont)
         return super().loglikelihood(requests, disable_tqdm)
 
     def loglikelihood_rolling(self, requests, disable_tqdm=False):
-        for req in requests:
+        sml_blocks = self._encode_batch(requests, lambda r: r.args[0])
+        for req, sml in zip(requests, sml_blocks):
             (text,) = req.args
-            req.arguments = (self._inject_sml(text),)
+            if sml:
+                req.arguments = (self._inject_sml(text, sml),)
         return super().loglikelihood_rolling(requests, disable_tqdm)
 
     def generate_until(self, requests, disable_tqdm=False):
-        for req in requests:
+        sml_blocks = self._encode_batch(requests, lambda r: r.args[0])
+        for req, sml in zip(requests, sml_blocks):
             ctx, gen_kwargs = req.args
-            req.arguments = (self._inject_sml(ctx), gen_kwargs)
+            if sml:
+                req.arguments = (self._inject_sml(ctx, sml), gen_kwargs)
         return super().generate_until(requests, disable_tqdm)
 
     # ── Diagnostics ────────────────────────────────────────────────────
