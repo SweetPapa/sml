@@ -7,3 +7,4 @@ data/*.jsonl
 data/*.csv.gz
 data/model_output/
 .venv/
+sml_opaque_eval/results/

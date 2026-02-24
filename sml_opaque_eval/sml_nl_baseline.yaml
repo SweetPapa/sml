@@ -1,0 +1,26 @@
+task: sml_nl_baseline
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: sml_nl_baseline.jsonl
+test_split: test
+output_type: multiple_choice
+doc_to_text: "{{question}}\nAnswer:"
+doc_to_choice: ["A", "B", "C", "D"]
+doc_to_target: "{{answer}}"
+metric_list:
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+  - metric: acc_norm
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0
+  description: >
+    Natural language baseline for the SML opaque entity reasoning evaluation.
+    The same 100 questions as sml_opaque_reasoning, but with <sml> blocks
+    replaced by equivalent natural language descriptions.  This tests whether
+    a vanilla model can reason from NL context as well as an SML-trained
+    model can reason from SML context.  If vanilla scores 80%+ here, SML
+    is an unnecessary abstraction.

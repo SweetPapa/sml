@@ -1,0 +1,25 @@
+task: sml_opaque_reasoning
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: sml_opaque_reasoning.jsonl
+test_split: test
+output_type: multiple_choice
+doc_to_text: "You are an AI assistant that uses Structured Markup Language (SML) context to ground your reasoning. Always analyze the provided SML block before answering.\n\n{{question}}\nAnswer:"
+doc_to_choice: ["A", "B", "C", "D"]
+doc_to_target: "{{answer}}"
+metric_list:
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+  - metric: acc_norm
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0
+  description: >
+    Tests whether an SML-trained model can perform genuine relational
+    reasoning from SML structure alone using completely opaque entity
+    tokens (X0, X1, ...).  100 multiple-choice questions across 6
+    categories: simple_lookup, negation, multi_hop, weight_comparison,
+    counting, and composite.

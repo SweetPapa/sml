@@ -5,7 +5,9 @@
       "Bash(python3:*)",
       "Bash(find:*)",
       "WebSearch",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(python:*)",
+      "Bash(wc:*)"
     ]
   }
 }
