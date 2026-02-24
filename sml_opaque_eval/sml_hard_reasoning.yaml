@@ -1,0 +1,27 @@
+task: sml_hard_reasoning
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: sml_hard_reasoning.jsonl
+test_split: test
+output_type: multiple_choice
+doc_to_text: "You are an AI assistant that uses Structured Markup Language (SML) context to ground your reasoning. Always analyze the provided SML block before answering.\n\n{{question}}\nAnswer:"
+doc_to_choice: ["A", "B", "C", "D"]
+doc_to_target: "{{answer}}"
+metric_list:
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+  - metric: acc_norm
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0
+  description: >
+    Hard mode SML opaque entity reasoning evaluation. 200 multiple-choice
+    questions across 8 categories requiring genuine graph traversal,
+    multi-step inference, conflict resolution, and structural analysis
+    on 6-12 entity graphs with 4-15 relations. Categories:
+    deep_chain_traversal, multi_path_divergence, confidence_threshold,
+    transitive_closure, inheritance_negation, prerequisite_satisfaction,
+    dense_structural, contradiction_resolution.

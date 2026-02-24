@@ -1,36 +1,34 @@
 #!/usr/bin/env python3
-"""Phase 1: Critical Baselines — Run all evaluations and compare results.
+"""Hard Mode Evaluation: Run all hard SML reasoning evaluations and compare.
 
-Orchestrates the three key comparisons needed for Phase 1:
-  1. SML fine-tuned model on SML questions (existing baseline — 86%)
-  2. Vanilla model on SML questions (existing baseline — 47%)
-  3. Vanilla model on NL questions (THE critical test)
+Orchestrates 4 evaluation configurations:
+  1. SML fine-tuned model on hard SML questions
+  2. Vanilla model on hard SML questions
+  3. Vanilla model on hard NL questions
+  4. SML fine-tuned model on hard NL questions
 
-Plus token efficiency measurement.
-
-If the vanilla model scores 80%+ on NL questions, SML is an unnecessary
-abstraction. If it scores significantly lower than the SML fine-tuned model,
-SML provides genuine structural reasoning advantage.
+Expected target difficulty:
+  - SML fine-tuned: 50-65% (vs 85% on easy)
+  - Vanilla on SML: 25-35% (vs 45% on easy)
+  - Vanilla on NL:  30-50% (vs 92% on easy)
+  - Random: 25%
 
 Usage:
-    # Full Phase 1 evaluation (all 3 comparisons)
-    python sml_opaque_eval/run_phase1_eval.py \\
+    # Full hard evaluation
+    python sml_opaque_eval/run_hard_eval.py \\
         --model sweetpapa/sml-qwen3-4b-phase3-full \\
         --baseline Qwen/Qwen3-4B
 
-    # Just the NL baseline test (fastest to answer the key question)
-    python sml_opaque_eval/run_phase1_eval.py \\
-        --baseline Qwen/Qwen3-4B \\
-        --nl-only
-
     # Quick test (5 examples per task)
-    python sml_opaque_eval/run_phase1_eval.py \\
+    python sml_opaque_eval/run_hard_eval.py \\
         --model sweetpapa/sml-qwen3-4b-phase3-full \\
         --baseline Qwen/Qwen3-4B \\
         --limit 5
 
-    # Token efficiency only (no GPU needed)
-    python sml_opaque_eval/run_phase1_eval.py --token-efficiency-only
+    # NL-only test
+    python sml_opaque_eval/run_hard_eval.py \\
+        --baseline Qwen/Qwen3-4B \\
+        --nl-only
 """
 
 from __future__ import annotations
@@ -46,10 +44,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 
-SML_TASK = "sml_opaque_reasoning"
-NL_TASK = "sml_nl_baseline"
-SML_JSONL = SCRIPT_DIR / "sml_opaque_reasoning.jsonl"
-NL_JSONL = SCRIPT_DIR / "sml_nl_baseline.jsonl"
+HARD_SML_TASK = "sml_hard_reasoning"
+HARD_NL_TASK = "sml_hard_nl_baseline"
+HARD_SML_JSONL = SCRIPT_DIR / "sml_hard_reasoning.jsonl"
+HARD_NL_JSONL = SCRIPT_DIR / "sml_hard_nl_baseline.jsonl"
 
 
 # ── Validation ───────────────────────────────────────────────────────────────
@@ -58,13 +56,17 @@ NL_JSONL = SCRIPT_DIR / "sml_nl_baseline.jsonl"
 def check_prerequisites():
     """Verify that required files exist."""
     errors = []
-    if not SML_JSONL.exists():
+    if not HARD_SML_JSONL.exists():
         errors.append(
-            f"  {SML_JSONL} not found — run: python sml_opaque_eval/generate_questions.py"
+            f"  {HARD_SML_JSONL} not found — run: "
+            f"python sml_opaque_eval/generate_hard_questions.py --no-groq"
         )
-    if not NL_JSONL.exists():
+    if not HARD_NL_JSONL.exists():
         errors.append(
-            f"  {NL_JSONL} not found — run: python sml_opaque_eval/generate_nl_baseline.py"
+            f"  {HARD_NL_JSONL} not found — run: "
+            f"python sml_opaque_eval/generate_nl_baseline.py "
+            f"--input sml_opaque_eval/sml_hard_reasoning.jsonl "
+            f"--output sml_opaque_eval/sml_hard_nl_baseline.jsonl"
         )
     if errors:
         print("ERROR: Missing prerequisite files:")
@@ -88,10 +90,7 @@ def run_lm_eval(
     extra_model_args: str = "",
     label: str = "",
 ) -> dict | None:
-    """Run lm_eval CLI for a single model/task combination.
-
-    Returns parsed results dict or None on failure.
-    """
+    """Run lm_eval CLI for a single model/task combination."""
     model_args = f"pretrained={model_path},dtype={dtype},trust_remote_code=True"
     if extra_model_args:
         model_args += f",{extra_model_args}"
@@ -124,21 +123,19 @@ def run_lm_eval(
         print(f"\nERROR: lm_eval exited with code {result.returncode} for: {tag}")
         return None
 
-    # Try to parse results from output directory
     if output_dir:
         return load_results(output_dir, task)
     return None
 
 
 def load_results(output_dir: str, task: str) -> dict | None:
-    """Attempt to load lm-eval results JSON from output directory.
-
-    lm-eval v0.4+ saves results as:
-        {output_path}/{model_name}/results_{timestamp}.{sequence}.json
-    """
+    """Attempt to load lm-eval results JSON from output directory."""
     out_path = Path(output_dir)
-    # Find all results_*.json files (lm-eval uses timestamped filenames)
-    result_files = sorted(out_path.rglob("results_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    result_files = sorted(
+        out_path.rglob("results_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     for json_file in result_files:
         try:
             with open(json_file) as f:
@@ -151,40 +148,14 @@ def load_results(output_dir: str, task: str) -> dict | None:
     return None
 
 
-# ── Token efficiency ─────────────────────────────────────────────────────────
-
-
-def run_token_efficiency(tokenizer_name: str | None, output_dir: str) -> dict:
-    """Run token efficiency measurement."""
-    print(f"\n{'='*70}")
-    print("TOKEN EFFICIENCY MEASUREMENT")
-    print(f"{'='*70}")
-
-    cmd = [
-        sys.executable, str(SCRIPT_DIR / "token_efficiency.py"),
-        "--output", os.path.join(output_dir, "token_efficiency.json"),
-    ]
-    if tokenizer_name:
-        cmd.extend(["--tokenizer", tokenizer_name])
-
-    subprocess.run(cmd)
-
-    # Load results
-    eff_path = Path(output_dir) / "token_efficiency.json"
-    if eff_path.exists():
-        with open(eff_path) as f:
-            return json.load(f)
-    return {}
-
-
 # ── Results display ──────────────────────────────────────────────────────────
 
 
-def print_phase1_header(args):
-    """Print the Phase 1 evaluation header."""
+def print_header(args):
+    """Print the evaluation header."""
     print(f"\n{'#'*70}")
-    print("#  PHASE 1: CRITICAL BASELINES")
-    print("#  SML Opaque Reasoning — Natural Language Comparison")
+    print("#  HARD MODE: SML Opaque Reasoning Evaluation")
+    print("#  200 complex questions — graph traversal, inference, conflict")
     print(f"#  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*70}")
 
@@ -198,10 +169,30 @@ def print_phase1_header(args):
         print(f"  Limit:            {args.limit} examples per task")
 
 
+def print_category_breakdown():
+    """Print the question category distribution."""
+    if not HARD_SML_JSONL.exists():
+        return
+
+    with open(HARD_SML_JSONL) as f:
+        questions = [json.loads(line) for line in f if line.strip()]
+
+    cats: dict[str, int] = {}
+    for q in questions:
+        cat = q.get("category", "unknown")
+        cats[cat] = cats.get(cat, 0) + 1
+
+    print(f"\n{'Category':<30} {'Count':>6}")
+    print("-" * 40)
+    for cat in sorted(cats):
+        print(f"  {cat:<28} {cats[cat]:>4}")
+    print(f"  {'TOTAL':<28} {len(questions):>4}")
+
+
 def print_results_table(results: dict[str, dict | None]):
     """Print a comparison table of all evaluation results."""
     print(f"\n{'='*70}")
-    print("PHASE 1 RESULTS SUMMARY")
+    print("HARD MODE RESULTS SUMMARY")
     print(f"{'='*70}")
 
     print(f"\n{'Configuration':<45} {'Accuracy':>10} {'Acc Norm':>10}")
@@ -223,48 +214,72 @@ def print_results_table(results: dict[str, dict | None]):
 
 
 def print_interpretation(results: dict[str, dict | None]):
-    """Print interpretation of the Phase 1 results."""
+    """Print interpretation of the hard evaluation results."""
     print(f"\n{'='*70}")
     print("INTERPRETATION")
     print(f"{'='*70}")
 
-    nl_vanilla = results.get("Vanilla on NL questions")
-    sml_tuned = results.get("SML fine-tuned on SML questions")
+    sml_tuned = results.get("SML fine-tuned on hard SML")
+    vanilla_sml = results.get("Vanilla on hard SML")
+    vanilla_nl = results.get("Vanilla on hard NL")
+    sml_tuned_nl = results.get("SML fine-tuned on hard NL")
 
-    if nl_vanilla and isinstance(nl_vanilla.get("acc,none", nl_vanilla.get("acc")), (int, float)):
-        nl_acc = nl_vanilla.get("acc,none", nl_vanilla.get("acc", 0))
+    def get_acc(r):
+        if r is None:
+            return None
+        v = r.get("acc,none", r.get("acc"))
+        return v if isinstance(v, (int, float)) else None
 
-        if nl_acc >= 0.80:
-            print("\n  CRITICAL: Vanilla NL baseline >= 80%!")
-            print("  The vanilla model can reason from natural language context")
-            print("  nearly as well as the SML-trained model from SML context.")
-            print("  SML may be an unnecessary abstraction for this task.")
-        elif nl_acc >= 0.60:
-            print("\n  MODERATE: Vanilla NL baseline is 60-80%.")
-            print("  The vanilla model has significant reasoning ability from NL.")
-            print("  SML advantage is reduced but may still be meaningful.")
-        elif nl_acc >= 0.40:
-            print("\n  ENCOURAGING: Vanilla NL baseline is 40-60%.")
-            print("  The vanilla model gets some value from NL context but")
-            print("  SML-trained model likely has a significant advantage.")
+    sml_acc = get_acc(sml_tuned)
+    van_sml_acc = get_acc(vanilla_sml)
+    van_nl_acc = get_acc(vanilla_nl)
+    sml_nl_acc = get_acc(sml_tuned_nl)
+
+    print("\n  TARGET RANGES:")
+    print("    SML fine-tuned on hard SML: 50-65%")
+    print("    Vanilla on hard SML:        25-35%")
+    print("    Vanilla on hard NL:         30-50%")
+    print("    Random:                     25%")
+
+    if van_nl_acc is not None:
+        print(f"\n  ACTUAL vanilla NL: {van_nl_acc*100:.1f}%")
+        if van_nl_acc > 0.70:
+            print("  WARNING: Vanilla NL > 70% — eval may still be too easy!")
+            print("  Consider: increase chain depth, add more distractors,")
+            print("  or require more multi-step reasoning.")
+        elif van_nl_acc > 0.50:
+            print("  Vanilla NL is 50-70% — moderately challenging.")
+        elif van_nl_acc > 0.30:
+            print("  GOOD: Vanilla NL is 30-50% — in target range.")
         else:
-            print("\n  STRONG: Vanilla NL baseline < 40%.")
-            print("  NL context alone is insufficient for reasoning.")
-            print("  SML provides genuine structural reasoning advantage.")
+            print("  Vanilla NL < 30% — near random. Eval may be too hard")
+            print("  or the model cannot parse the NL context at all.")
 
-        if sml_tuned:
-            sml_acc = sml_tuned.get("acc,none", sml_tuned.get("acc", 0))
-            if isinstance(sml_acc, (int, float)):
-                delta = sml_acc - nl_acc
-                print(f"\n  SML fine-tuned ({sml_acc*100:.1f}%) vs NL vanilla ({nl_acc*100:.1f}%)")
-                print(f"  Delta: {delta*100:+.1f} percentage points")
-    else:
-        print("\n  NL baseline results not available. Run with --baseline to test.")
+    if sml_acc is not None:
+        print(f"\n  ACTUAL SML fine-tuned: {sml_acc*100:.1f}%")
+        if sml_acc < 0.35:
+            print("  WARNING: SML fine-tuned < 35% — eval may be too hard!")
+            print("  Consider: reduce chain depth or graph density.")
+        elif sml_acc > 0.65:
+            print("  SML fine-tuned > 65% — model handles hard questions well.")
+        else:
+            print("  GOOD: SML fine-tuned is 35-65% — in target range.")
+
+    if sml_acc is not None and van_nl_acc is not None:
+        delta = sml_acc - van_nl_acc
+        print(f"\n  SML advantage: {delta*100:+.1f} percentage points")
+        if delta > 0.15:
+            print("  Strong SML reasoning advantage on hard questions!")
+        elif delta > 0.05:
+            print("  Moderate SML advantage.")
+        else:
+            print("  Minimal SML advantage — eval design may need adjustment.")
 
     print(f"\n{'='*70}")
-    print("KEY QUESTION: Does the vanilla model score 80%+ on NL questions?")
-    print("  If YES → SML is an unnecessary abstraction")
-    print("  If NO  → SML provides genuine structural reasoning advantage")
+    print("KEY QUESTION: Does hard mode differentiate SML from NL?")
+    print("  If SML fine-tuned >> Vanilla NL → SML provides real advantage")
+    print("  If both near random → eval too hard, reduce complexity")
+    print("  If Vanilla NL > 70% → eval too easy, increase complexity")
     print(f"{'='*70}")
 
 
@@ -273,21 +288,18 @@ def print_interpretation(results: dict[str, dict | None]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Phase 1: Critical Baselines — SML vs Natural Language comparison",
+        description="Hard Mode: Complex SML reasoning evaluation (200 questions)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full Phase 1 evaluation
+  # Full hard evaluation
   %(prog)s --model sweetpapa/sml-qwen3-4b-phase3-full --baseline Qwen/Qwen3-4B
 
-  # Just the NL baseline (fastest critical test)
-  %(prog)s --baseline Qwen/Qwen3-4B --nl-only
-
-  # Quick dry run
+  # Quick test
   %(prog)s --model sweetpapa/sml-qwen3-4b-phase3-full --baseline Qwen/Qwen3-4B --limit 5
 
-  # Token efficiency only (no GPU)
-  %(prog)s --token-efficiency-only
+  # NL baseline only
+  %(prog)s --baseline Qwen/Qwen3-4B --nl-only
         """,
     )
 
@@ -303,11 +315,6 @@ Examples:
         "--nl-only",
         action="store_true",
         help="Only run the NL baseline test (requires --baseline)",
-    )
-    parser.add_argument(
-        "--token-efficiency-only",
-        action="store_true",
-        help="Only run token efficiency measurement (no GPU needed)",
     )
     parser.add_argument(
         "--model-type",
@@ -337,7 +344,7 @@ Examples:
     )
     parser.add_argument(
         "--output-dir",
-        default=str(SCRIPT_DIR / "results" / "phase1"),
+        default=str(SCRIPT_DIR / "results" / "hard"),
         help="Output directory for results",
     )
     parser.add_argument(
@@ -349,94 +356,85 @@ Examples:
     args = parser.parse_args()
 
     # Validate arguments
-    if not args.token_efficiency_only and not args.model and not args.baseline:
-        parser.error("Must specify --model, --baseline, or --token-efficiency-only")
+    if not args.model and not args.baseline:
+        parser.error("Must specify --model, --baseline, or both")
     if args.nl_only and not args.baseline:
         parser.error("--nl-only requires --baseline")
 
     check_prerequisites()
-    print_phase1_header(args)
+    print_header(args)
+    print_category_breakdown()
 
     out_dir = args.output_dir
     os.makedirs(out_dir, exist_ok=True)
 
     results: dict[str, dict | None] = {}
 
-    # ── Token efficiency (always run unless skipped) ──────────────────────
-
-    if not args.nl_only or args.token_efficiency_only:
-        tokenizer_for_eff = args.baseline or args.model
-        run_token_efficiency(tokenizer_for_eff, out_dir)
-
-    if args.token_efficiency_only:
-        print("\nToken efficiency measurement complete.")
-        return
-
     # ── Evaluation runs ──────────────────────────────────────────────────
 
     if args.model and not args.nl_only:
-        # 1. SML fine-tuned on SML questions
+        # 1. SML fine-tuned on hard SML questions
         r = run_lm_eval(
             model_path=args.model,
-            task=SML_TASK,
+            task=HARD_SML_TASK,
             device=args.device,
             batch_size=args.batch_size,
             dtype=args.dtype,
             limit=args.limit,
-            output_dir=os.path.join(out_dir, "sml_finetuned_sml"),
+            output_dir=os.path.join(out_dir, "sml_finetuned_hard_sml"),
             model_type=args.model_type,
             extra_model_args=args.extra_model_args,
-            label="SML fine-tuned on SML questions",
+            label="SML fine-tuned on hard SML",
         )
-        results["SML fine-tuned on SML questions"] = r
+        results["SML fine-tuned on hard SML"] = r
 
     if args.baseline and not args.nl_only:
-        # 2. Vanilla on SML questions
+        # 2. Vanilla on hard SML questions
         r = run_lm_eval(
             model_path=args.baseline,
-            task=SML_TASK,
+            task=HARD_SML_TASK,
             device=args.device,
             batch_size=args.batch_size,
             dtype=args.dtype,
             limit=args.limit,
-            output_dir=os.path.join(out_dir, "vanilla_sml"),
+            output_dir=os.path.join(out_dir, "vanilla_hard_sml"),
             model_type=args.model_type,
             extra_model_args=args.extra_model_args,
-            label="Vanilla on SML questions",
+            label="Vanilla on hard SML",
         )
-        results["Vanilla on SML questions"] = r
+        results["Vanilla on hard SML"] = r
 
     if args.baseline:
-        # 3. THE CRITICAL TEST: Vanilla on NL questions
+        # 3. Vanilla on hard NL questions
         r = run_lm_eval(
             model_path=args.baseline,
-            task=NL_TASK,
+            task=HARD_NL_TASK,
             device=args.device,
             batch_size=args.batch_size,
             dtype=args.dtype,
             limit=args.limit,
-            output_dir=os.path.join(out_dir, "vanilla_nl"),
+            output_dir=os.path.join(out_dir, "vanilla_hard_nl"),
             model_type=args.model_type,
             extra_model_args=args.extra_model_args,
-            label="Vanilla on NL questions",
+            label="Vanilla on hard NL",
         )
-        results["Vanilla on NL questions"] = r
+        results["Vanilla on hard NL"] = r
 
     if args.model:
-        # 4. BONUS: SML fine-tuned on NL questions (how does it transfer?)
+        # 4. SML fine-tuned on hard NL questions
         r = run_lm_eval(
             model_path=args.model,
-            task=NL_TASK,
+            task=HARD_NL_TASK,
             device=args.device,
             batch_size=args.batch_size,
             dtype=args.dtype,
             limit=args.limit,
-            output_dir=os.path.join(out_dir, "sml_finetuned_nl"),
+            output_dir=os.path.join(out_dir, "sml_finetuned_hard_nl"),
             model_type=args.model_type,
             extra_model_args=args.extra_model_args,
-            label="SML fine-tuned on NL questions",
+            label="SML fine-tuned on hard NL",
         )
-        results["SML fine-tuned on NL questions"] = r
+        results["SML fine-tuned on hard NL"] = r
 
     # ── Display results ──────────────────────────────────────────────────
 
@@ -444,7 +442,7 @@ Examples:
     print_interpretation(results)
 
     # Save combined results
-    combined_path = Path(out_dir) / "phase1_summary.json"
+    combined_path = Path(out_dir) / "hard_eval_summary.json"
     with open(combined_path, "w") as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),
@@ -453,7 +451,7 @@ Examples:
                 k: v for k, v in results.items() if v is not None
             },
         }, f, indent=2)
-    print(f"\nPhase 1 results saved to: {combined_path}")
+    print(f"\nHard eval results saved to: {combined_path}")
     print("Done!")
 
 

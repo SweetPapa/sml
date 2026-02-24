@@ -1,0 +1,26 @@
+task: sml_hard_nl_baseline
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: sml_hard_nl_baseline.jsonl
+test_split: test
+output_type: multiple_choice
+doc_to_text: "{{question}}\nAnswer:"
+doc_to_choice: ["A", "B", "C", "D"]
+doc_to_target: "{{answer}}"
+metric_list:
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+  - metric: acc_norm
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0
+  description: >
+    Natural language baseline for the hard SML opaque entity reasoning
+    evaluation. The same 200 questions as sml_hard_reasoning, but with
+    <sml> blocks replaced by equivalent natural language descriptions.
+    Tests whether a vanilla model can reason from NL context on complex
+    graph problems. Target: vanilla NL should score significantly lower
+    than on the easy eval (30-50% vs 92%).
