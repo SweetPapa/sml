@@ -1,0 +1,24 @@
+{
+  "version": "3.0",
+  "output_path": "C:\\code\\sml\\data\\training_data_v3.jsonl",
+  "requested": {
+    "A": 25000,
+    "B": 10000,
+    "C": 10000,
+    "D": 5000
+  },
+  "stats": {
+    "total": 33810,
+    "generated": 33385,
+    "failed": 425,
+    "validation_errors": 0,
+    "by_category": {
+      "D": 4384,
+      "B": 9835,
+      "C": 9937,
+      "A": 9229
+    },
+    "total_retries": 2438,
+    "elapsed_seconds": 111864.9
+  }
+}

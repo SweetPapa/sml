@@ -6,5 +6,7 @@ data/*.db
 data/*.jsonl
 data/*.csv.gz
 data/model_output/
+data/eval_results/
 .venv/
 sml_opaque_eval/results/
+unsloth_compiled_cache/

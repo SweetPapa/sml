@@ -77,10 +77,10 @@ def main():
     # Determine category distribution
     if args.mode == "test":
         total = 50
-    elif args.mode == "full":
-        total = 500
     elif args.num_examples is not None:
         total = args.num_examples
+    elif args.mode == "full":
+        total = 500
     else:
         total = sum(V3_CATEGORY_DISTRIBUTION.values())
 
