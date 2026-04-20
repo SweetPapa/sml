@@ -1,0 +1,109 @@
+# SML as attention priming — viability verdict and test plan
+
+**The core hypothesis is supported by the literature in its weak form and worth running, but with two caveats that determine whether it beats matched baselines.** Priming an LLM with retrieved "considerations" rather than facts reliably improves reasoning — Generated Knowledge Prompting, Analogical Prompting, Hint-before-Solving, and PASTA all independently demonstrate single-digit-to-double-digit gains from non-factual cues that redirect attention over existing parametric knowledge. The user's prior fine-tuning failure ("format learned, outputs unchanged") is a textbook result predicted by the Superficial Alignment Hypothesis, not evidence against the SML thesis. The two real risks are that (a) a compact custom notation the base model has never seen is a weaker attention signal than prose that matches its training distribution, and (b) the hardest comparison — structured SML versus a plain bullet-list of concept names — is where most novel DSL approaches actually collapse. Any experiment that doesn't explicitly beat that minimal-priming baseline plus a random-SML placebo hasn't demonstrated the priming effect. This report integrates prior art across GraphRAG-family retrieval, inference-time steering, fine-tuning-for-format failure modes, and offers a concrete 2-3 week evaluation playbook.
+
+## Why the weak form is well supported
+
+The prompt-level priming literature already validates the core mechanism the user is proposing. **Generated Knowledge Prompting** (Liu et al., ACL 2022) showed that self-generated knowledge statements — which by construction contain no information the model didn't already have — set SOTA on NumerSense, CSQA2, and QASC. **Analogical Prompting** (Yasunaga et al., ICLR 2024) had models recall relevant problems before solving and beat zero-shot CoT on GSM8K, MATH, and Codeforces. Most directly, **Hint-before-Solving Prompting** (Fu et al., 2024) injected explicit-but-non-answer-bearing hints and reported **+9.7% relative accuracy on Llama2-70B-Chat across six reasoning benchmarks**, framing the mechanism explicitly as "guiding LLMs to effectively utilize encoded knowledge." That is the user's thesis, validated.
+
+The mechanistic plausibility comes from the activation-steering line. **Inference-Time Intervention** (Li et al., NeurIPS 2023) shifted LLaMA-Alpaca's TruthfulQA score from 32.5% to 65.1% by reallocating attention across a small set of heads — showing the truthful output was already representable internally, just not dominant. **Contrastive Activation Addition** (Rimsky et al., ACL 2024) generalizes this and, importantly, reports that activation steering outperforms prompt-level few-shot steering on matched behaviors — meaning textual cues are a *noisier implementation* of the same underlying operation. **PASTA** (Zhang et al., 2024) is the closest published analog to the SML proposal: it lets users mark prompt substrings for attention upweighting and achieves +22% average accuracy on LLaMA-7B across JSON formatting, pronoun resolution, bias tasks, and contextual knowledge conflicts. PASTA's key finding also constitutes the strongest challenge: the paper explicitly states that modern LLMs "struggle to discern weak signals from a couple of marker tokens" when emphasis is purely textual. That is, **textual markup is a real-but-weak attention signal, whose strength depends heavily on whether the model saw similar notation in pretraining**.
+
+## Where structured prompting wins — and where it doesn't
+
+The structured-prompting evidence splits clean. **Chain-of-Symbol** (Hu et al., 2023), **Program-of-Thoughts** (Chen et al., TMLR 2023), and **PAL** (Gao et al., 2022) all report large gains from replacing prose with symbolic or code-like notation — PoT averages roughly +12% over CoT across GSM8K, AQuA, SVAMP and adjacent benchmarks; PAL gains +14% on PENGUINS and +11% on DATE reasoning. A recent Stanford DSPy+HELM study (Aali et al., 2025) reports **+6% average gain from structured prompting across seven benchmarks and four frontier models**, with leaderboard rankings shifting on 5/7 tasks. Anthropic's own prompting guidance — while not a peer-reviewed result — recommends XML tags precisely because Claude's training distribution contains them.
+
+The critical caveat: *all of these wins come from notation the base model has already seen at pretraining scale* (Python, XML, mathematical symbols). A novel custom DSL has no such grounding. The user's SML will behave more like a low-resource notation unless (a) it visually resembles XML/YAML/JSON, (b) a schema legend is provided in-context, or (c) the base model is frontier-scale. This predicts that **SML vs plain concept-name bullets is the decisive comparison**, not SML vs prose RAG.
+
+## The GraphRAG family is fact-injection, not priming
+
+Despite superficial similarity, the graph-RAG literature is mostly disanalogous to the SML proposal. **Microsoft GraphRAG** (Edge et al., 2024) wins on "sensemaking" queries — global summaries, thematic synthesis — where community summaries provide information the model genuinely didn't have in context, at 10-100× vanilla RAG indexing cost. **KAPING** (Baek et al., 2023), **Think-on-Graph** (Sun et al., ICLR 2024, 82.6% Hits@1 on WebQSP with GPT-4), and **RoG** (Luo et al., ICLR 2024, 85.7 Hits@1 on WebQSP after fine-tuning) serialize retrieved subgraphs as verbalized triples or relation paths and inject them as ground-truth facts. **HippoRAG** (Jiménez Gutiérrez et al., NeurIPS 2024) reports +20% over SOTA on MuSiQue/2Wiki at 10-30× lower cost than iterative IRCoT, using Personalized PageRank over an OpenIE graph — again fact retrieval, not priming. **LightRAG** drops community detection in favor of dual-level keyword retrieval for cost efficiency. **MindMap** (Wen et al., ACL 2024) is the closest in framing to "considerations" — it builds per-query evidence subgraphs and asks the LLM to "draw a mind-map" reasoning trace, blending facts and hints.
+
+The practical takeaway: if SML is retrieved as compact relation shorthand and framed as "concepts to consider," this is a **priming-flavored variant of KAPING/MindMap** rather than GraphRAG. The retrieval infrastructure (embedding-based nearest-neighbor over triple-like entries) is standard; the injection framing is the novel contribution. None of the established graph-RAG benchmarks measure the priming-vs-injection distinction, so direct literature comparison will be imperfect.
+
+## The multi-phase retrieval literature favors iteration and gating
+
+If SML is treated as a single-shot pre-generation injection, the user is in Plan-and-Solve territory (Wang et al., ACL 2023) — a plan-like preamble before the answer. This reliably beats zero-shot CoT on arithmetic and commonsense. But if tasks are multi-hop or long-form, the literature strongly favors *iterative* variants. **IRCoT** (Trivedi et al., ACL 2023) interleaves one CoT sentence with one retrieval step and gains +11-21 retrieval recall points and up to +15 QA-F1 on HotpotQA/2Wiki/MuSiQue — with a 3B Flan-T5 + IRCoT beating 58× larger GPT-3 + single-shot retrieval. **FLARE** (Jiang et al., EMNLP 2023) triggers retrieval only when generated tokens have low probability. **RAT** (Wang et al., 2024) iteratively revises each CoT step with new retrievals, reporting relative gains of 13-43% across code/math/creative-writing/planning. **Self-RAG** (Asai et al., ICLR 2024) trains the model to emit reflection tokens that decide when to retrieve at all. 
+
+The Mallen et al. PopQA paper (ACL 2023) delivers the single most important finding for this proposal: **retrieval hurts accuracy on high-popularity questions the model already knows** — distracting context dominates correct parametric knowledge. Adaptive Retrieval (retrieve only below a popularity threshold) beats always-on retrieval. For SML, this predicts that always-injecting considerations will sometimes degrade outputs on queries whose concepts the model already has strongly grounded. Gating is non-optional for a production system.
+
+## Lost-in-the-middle dictates placement
+
+**Liu et al.** (TACL 2024) showed the canonical U-shape: relevant information buried in the middle of a long context is significantly under-attended even on "long-context" models, with the effect persisting in 128K+ models according to 2025 Chroma benchmarks. For SML, this is a hard constraint: annotations must sit at the **start of the prompt** (preamble, with schema legend) or **immediately before the query** (end-anchor), never buried mid-context. If multiple SML entries are retrieved, reorder by relevance so strongest lands at the edges (Peysakhovich & Lerer, "Attention Sorting Combats Recency Bias," 2023). HyDE-style query expansion (Gao et al., ACL 2023) and Query2Doc (Wang et al., EMNLP 2023) are directly applicable for SML retrieval — generate a hypothetical SML-style expansion of the query before embedding — since short queries match poorly to richer entries.
+
+## The fine-tuning outcome was the predicted one
+
+The user's prior experience — fine-tuning taught the SML format but task performance didn't improve — is the textbook result, not an anomaly. Five independent lines of evidence converge:
+
+**LIMA** (Zhou et al., NeurIPS 2023) formulated the Superficial Alignment Hypothesis explicitly: "A model's knowledge and capabilities are learnt almost entirely during pretraining, while alignment teaches it which subdistribution of formats should be used." **Ghosh et al.** (2024) followed with token-distribution analysis showing "LoRA fine-tuning is limited to learning response initiation and style tokens, and full-parameter fine-tuning leads to knowledge degradation." **Min et al.** (2022, "Rethinking the Role of Demonstrations") showed that in few-shot ICL, format and label space drive performance while ground-truth input-label mapping barely matters — implying that if ICL of the format doesn't move the task, FT of the same format won't either. **Gudibande et al.** (2023, "False Promise of Imitating Proprietary LLMs") documented student models learning GPT-4's style without its capabilities. A Stanford CS224N chess-engine study found small LMs fine-tuned on chess "generated critical chess-related tokens almost at random" despite learning the surrounding natural-language scaffold — almost exactly the user's failure mode. A Gemini finetuning study (Zhao et al., "Mapping the Boundaries of Knowledge Injection") reports **tone/style FT reaching ~96% accuracy while knowledge/reasoning FT on the same data plateaus at ~11%**.
+
+Two exceptions where format FT *does* transfer to gains: (1) when the format exposes intermediate computation states — **scratchpad** fine-tuning (Nye et al., 2021) and **STaR** (Zelikman et al., 2022) work because they externalize reasoning steps, and STaR filters for answer correctness. (2) When format exposure happens at pretraining scale — MolT5 and SmilesT5 show SMILES gains, but only after large-corpus pretraining; ChessLLM reached 1788 Elo via SFT on millions of games. Light fine-tuning on a compact relational shorthand without either property will not produce reasoning transfer.
+
+**Tokenization deserves a specific caution.** If the user added SML-specific tokens via `add_tokens`, the new embeddings were randomly initialized, meaning the model likely learned to recognize the tags from surrounding context rather than from the tag embeddings carrying useful semantics. Best practice is to initialize new-token embeddings as the mean of existing embeddings and keep the embedding layer plus LM head trainable. Without this, novel tags behave like near-glitch-tokens — parsed from context cues but semantically empty. Alternatively, compose SML from sequences of already-well-tokenized characters (brackets, arrows, keywords) to avoid the added-token problem entirely.
+
+## Fine-tuning recommendation
+
+Don't invest more in format-SFT expecting task gains; the returns are exhausted. Instead, in priority order:
+
+Run the in-context ceiling test first. If Claude Sonnet or GPT-4.1 with a one-page SML legend plus 5-10 examples can't use the SML to improve on a task, the shorthand is not a useful reasoning scaffold and no amount of FT of a smaller model will rescue it. This is a $50 experiment that settles the question.
+
+If ICL helps on frontier models but not the user's target model, distill rationale traces from the frontier model and fine-tune on *those*, STaR-style — filter generated traces for task correctness and retrain. The gain will come from correct rationales, not the notation. If the budget permits, use **LoRA** over full FT: Ghosh et al., Biderman et al., and Shuttleworth et al. all find full FT incurs an alignment tax and creates "intruder dimensions" that degrade general reasoning, while LoRA is essentially sufficient for format-plus-style work. **Prefix-tuning** (Li & Liang, 2021) is a reasonable alternative for this specific use case — generation with stable output structure — and excels in low-data OOD settings. Keep the FT as a lightweight "SML-inclined adapter" layered onto a strong base rather than retraining from scratch.
+
+The most productive reframe: if SML is meant to scaffold *reasoning* rather than just compress concepts, redesign it so entries expose the kind of intermediate relational inference a scratchpad would. Otherwise, treat SML as a prompting convention, skip the FT stage, and put engineering effort into retrieval quality and placement.
+
+## Experimental design — the playbook
+
+The evaluation must answer three distinct questions, and failing any one falsifies the core claim: does SML injection beat no-injection, does it beat matched prose RAG on content, and does it beat matched concept-name-only priming on format?
+
+**Primary benchmarks.** In descending priority:
+
+**PopQA** (Mallen et al., 2023) is the single most important benchmark. Its popularity stratification lets you test the priming-vs-injection claim directly: if SML primes existing knowledge, gains should concentrate on *head* (popular) entities where the model already knows the fact; if SML is silently supplying information, gains should concentrate on *tail* entities where prose RAG also wins. That stratified split is the cleanest published way to separate the two hypotheses. Target N=1000.
+
+**CommonsenseQA, ARC-Challenge, StrategyQA** — questions answered by reasoning over knowledge a modern LLM already has. Gains here are strong evidence of priming since new information is implausible. Target N=1000 each.
+
+**MuSiQue-Ans** and **2WikiMultihopQA** — multi-hop benchmarks that test cross-concept activation. MuSiQue is the hardest and most discriminative; 2Wiki gives comparability to HippoRAG/IRCoT numbers. Target N=1000 each.
+
+Skip TriviaQA and Natural Questions as headline metrics — modern instruct models saturate them with parametric knowledge, masking effects. If the SML has a domain focus, add MMLU subsets or MedQA/LegalBench.
+
+**The baseline matrix that must be run.** Nine conditions on the same items with paired seeds:
+
+| ID | Condition | Isolates |
+|----|-----------|----------|
+| a | No injection | Parametric floor |
+| b | Vanilla prose RAG (token-matched to SML content) | Information content, facts framing |
+| c | Bullet list of retrieved concept names only | Minimal priming — **the hardest baseline to beat** |
+| d | Full SML, base model | Method on stock model |
+| e | Full SML, SML-adapted model (LoRA) | Incremental value of FT |
+| f | **Random/irrelevant SML, same structure** | Placebo — distinguishes structure artifact from real priming |
+| g | Human-written natural-language considerations | Oracle ceiling |
+| h | Random-relevance prose RAG | Prose placebo |
+| i | Post-hoc SML (inject after initial answer) | If priming hypothesis is right, should help less than pre-injection |
+
+The key diagnostic pairs: (d) vs (f) tests whether retrieval relevance matters; (d) vs (c) tests whether structure matters beyond concept names; (d) vs (b) tests consideration-framing vs fact-framing holding content constant; (e) vs (d) tests FT value; (d) vs (i) tests the "priming phase" claim vs "more context helps."
+
+**Factorial ablation.** Retrieval (relevant/random) × Format (prose/SML/bullet-names) × FT (base/LoRA) is 12 cells; a fractional design using a through i above covers the main effects. Adding an *attention-analysis* run on an open-weights model (Llama-3.1-8B or Qwen2.5-7B with `output_attentions=True` via transformer-lens) lets you check whether question-token attention actually spikes on SML concept tokens versus relation tokens — direct mechanistic evidence.
+
+**Diagnostic experiments that matter most:**
+
+1. **Popularity stratification on PopQA** — the cleanest priming-vs-injection test.
+2. **Relation-shuffle ablation** — keep concept names, shuffle edges. If gains come from activating concept embeddings, shuffling preserves most of the gain; if gains come from structured semantics, performance collapses. Settles what SML actually contributes.
+3. **Token-count-matched prose** — construct prose summaries with identical token counts to SML blocks. Rules out the "more context = more thinking" confound that plagues naive comparisons.
+4. **Knows-vs-doesn't-know split** — pre-probe the base model per item; gains should concentrate on *known* items under the priming hypothesis.
+5. **Adversarial SML** — inject SML for plausibly-adjacent-but-wrong concepts. Measures over-steering risk; essential for deployment realism.
+
+**Metrics beyond accuracy.** Log faithfulness, context precision/recall, and noise sensitivity via RAGAS — interestingly, the priming hypothesis *predicts lower faithfulness to SML than to prose RAG* because the model is supposed to use its own knowledge, not copy the context. Track token cost, latency, and retrieval recall@k. Hand-label a 100-item failure-mode taxonomy per condition across five categories: over-steering, distraction (long SML crowding out question), conflict (SML says X, parametric says Y), relation-hallucination (model restates an edge that wasn't there), and no-effect.
+
+**Statistical power.** Follow Card et al. ("With Little Power Comes Great Responsibility," EMNLP 2020). For 3-5% accuracy gains on paired binary tasks, use McNemar's test on paired discordance with N≥1000 for 80% power on 3% effects. Bootstrap 95% CIs (≥10,000 resamples) on every metric; report CIs not just point estimates. Mixed-effects models with item-level random intercepts when pooling across benchmarks or popularity strata. Minimum 3 seeds per condition. Pre-register primary hypotheses on the pilot before seeing test results; apply Holm-Bonferroni within the primary hypothesis family.
+
+**Infrastructure.** Use **lm-evaluation-harness** as the primary accuracy driver (native HF integration, standardized configs matching published leaderboards); implement SML injection as a custom task template that patches `doc_to_text` with the retrieval pipeline. Use **RAGAS** for all RAG-specific metrics (faithfulness, context precision/recall, noise sensitivity). Use **inspect_ai** for custom LLM-as-judge rubrics and the diagnostic experiments that don't fit the harness mold. Use **DeepEval** for CI regression tests of the retrieval pipeline.
+
+**Execution timeline.** Week 1 pilot on 200 PopQA items, conditions a/b/d/f only, to confirm pipeline and measure paired-discordance rate for power analysis. Week 1-2 full benchmarks at N=1000 each, all nine conditions. Week 2 diagnostic experiments. Week 3 failure-mode labeling and write-up.
+
+**Pre-registered primary hypothesis (template):** "On PopQA head-popularity items, condition (d) SML injection achieves higher EM than condition (b) prose RAG, with effect size ≥2 accuracy points, McNemar p<0.01, bootstrap 95% CI excluding 0." Secondary: "(d) beats (f) by ≥3 points on the same slice." If (d) doesn't beat (f), the priming hypothesis is falsified — and that is the most informative negative result the study can produce. Design to publish either outcome.
+
+## Bottom line and the specific novelty claim
+
+The user's proposal occupies an empirically plausible gap: no published work directly benchmarks a retrieved, compact, custom relational DSL as a priming-style annotation system. The closest prior art is Generated Knowledge Prompting (unstructured, self-generated), Analogical Prompting (exemplars, self-generated), Hint-before-Solving (hints, self or retrieved), Chain-of-Symbol (task-specific symbolic notation, hand-designed), and MindMap (retrieved subgraphs presented as reasoning scaffolds). The unique combination of *retrieved* + *structured/compact* + *consideration-framed* is genuinely under-explored.
+
+The three most likely failure modes, ranked by probability: (1) SML gains fail to beat the matched concept-names-only baseline (c), showing structure adds nothing beyond surface priming — this is the most likely outcome and the one the experiments must be designed to detect honestly; (2) SML gains appear but track retrieval recall rather than priming, i.e., method is silently doing fact injection in a compact wrapper — the popularity-stratification and relation-shuffle ablations will catch this; (3) SML degrades outputs when the base model already knows the concepts (Mallen's effect), requiring adaptive gating. 
+
+The three most likely ways to win: frontier base model with SML-as-schema-legend in the system prompt (not FT), adaptive gating via simple popularity/uncertainty thresholds, and end-of-prompt placement adjacent to the query. If the full pipeline beats both prose RAG and concept-name bullets on PopQA head items and StrategyQA, with retained or improved faithfulness metrics, the priming thesis is established as a publishable positive result. If it only beats no-injection, it's a complicated way to do standard RAG. That is the bar.

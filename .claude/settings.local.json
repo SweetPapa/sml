@@ -8,7 +8,8 @@
       "WebFetch(domain:github.com)",
       "Bash(python:*)",
       "Bash(wc:*)",
-      "WebFetch(domain:colab.research.google.com)"
+      "WebFetch(domain:colab.research.google.com)",
+      "Bash(xargs ls *)"
     ]
   }
 }
